@@ -324,6 +324,89 @@ function textToADF(text) {
   };
 }
 
+// Replace your existing /api/deploy-to-jira endpoint with this fixed version:
+
+// Helper function to convert plain text to Atlassian Document Format
+function textToADF(text) {
+  if (!text || text.trim() === '') {
+    return {
+      type: "doc",
+      version: 1,
+      content: [
+        {
+          type: "paragraph",
+          content: []
+        }
+      ]
+    };
+  }
+
+  const lines = text.split('\n');
+  const content = [];
+  
+  for (const line of lines) {
+    const trimmedLine = line.trim();
+    
+    if (trimmedLine === '') {
+      // Skip empty lines to avoid empty paragraphs
+      continue;
+    }
+    
+    // Create paragraph with text content
+    const paragraph = {
+      type: "paragraph",
+      content: [
+        {
+          type: "text",
+          text: trimmedLine
+        }
+      ]
+    };
+    
+    // Add bold formatting for header lines
+    if (trimmedLine.startsWith('🎯 ') || trimmedLine.startsWith('✅ ') || 
+        trimmedLine.startsWith('⚙️ ') || trimmedLine.startsWith('⚠️ ') || 
+        trimmedLine.startsWith('🤖 ')) {
+      paragraph.content[0].marks = [{ type: "strong" }];
+    }
+    
+    content.push(paragraph);
+  }
+  
+  // Ensure we always have at least one paragraph
+  if (content.length === 0) {
+    content.push({
+      type: "paragraph",
+      content: []
+    });
+  }
+  
+  return {
+    type: "doc",
+    version: 1,
+    content: content
+  };
+}
+
+// Simpler ADF function as fallback
+function simpleTextToADF(text) {
+  return {
+    type: "doc",
+    version: 1,
+    content: [
+      {
+        type: "paragraph",
+        content: [
+          {
+            type: "text",
+            text: text || "No description provided"
+          }
+        ]
+      }
+    ]
+  };
+}
+
 // Deploy story to JIRA - Fixed with ADF format
 app.post('/api/deploy-to-jira', async (req, res) => {
   try {
@@ -421,8 +504,14 @@ app.post('/api/deploy-to-jira', async (req, res) => {
       `Confidence: ${Math.round(story.confidence * 100)}% | Date: ${story.sourceTimestamp}`
     ].join('\n');
 
-    // Convert to ADF format
-    const adfDescription = textToADF(descriptionText);
+    // Convert to ADF format - try simple version first
+    let adfDescription;
+    try {
+      adfDescription = textToADF(descriptionText);
+    } catch (e) {
+      console.log('Complex ADF failed, using simple version:', e.message);
+      adfDescription = simpleTextToADF(descriptionText);
+    }
 
     const jiraTicket = {
       fields: {
@@ -444,6 +533,7 @@ app.post('/api/deploy-to-jira', async (req, res) => {
 
     console.log(`Creating ticket with summary: "${story.title}"`);
     console.log(`Description format: ADF with ${adfDescription.content.length} blocks`);
+    console.log(`ADF Structure:`, JSON.stringify(adfDescription, null, 2));
 
     const createResponse = await fetch(`${cleanUrl}/rest/api/3/issue`, {
       method: 'POST',
