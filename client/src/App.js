@@ -280,6 +280,66 @@ function App() {
     }
   };
 
+  // Sorting and filtering logic
+  const getSortedAndFilteredStories = () => {
+    let stories = [...processedStories];
+
+    // Apply search filter
+    if (searchTerm) {
+      stories = stories.filter(story => 
+        story.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        story.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        story.sourceTranscript.toLowerCase().includes(searchTerm.toLowerCase())
+      );
+    }
+
+    // Apply category filter
+    switch (filterBy) {
+      case 'recommended':
+        stories = stories.filter(s => s.confidence >= 0.8 && s.priority === 'High');
+        break;
+      case 'high-confidence':
+        stories = stories.filter(s => s.confidence >= 0.8);
+        break;
+      case 'recent':
+        const twoDaysAgo = new Date();
+        twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+        stories = stories.filter(s => new Date(s.sourceTimestamp) >= twoDaysAgo);
+        break;
+      case 'needs-review':
+        stories = stories.filter(s => s.confidence < 0.7);
+        break;
+      default:
+        break;
+    }
+
+    // Apply sorting
+    switch (sortBy) {
+      case 'confidence':
+        stories.sort((a, b) => b.confidence - a.confidence);
+        break;
+      case 'priority':
+        const priorityOrder = { 'High': 3, 'Medium': 2, 'Low': 1 };
+        stories.sort((a, b) => (priorityOrder[b.priority] || 0) - (priorityOrder[a.priority] || 0));
+        break;
+      case 'effort':
+        stories.sort((a, b) => {
+          const aEffort = parseInt(a.effort) || 0;
+          const bEffort = parseInt(b.effort) || 0;
+          return aEffort - bEffort;
+        });
+        break;
+      case 'date':
+      default:
+        stories.sort((a, b) => new Date(b.sourceTimestamp) - new Date(a.sourceTimestamp));
+        break;
+    }
+
+    return stories;
+  };
+
+  const filteredAndSortedStories = getSortedAndFilteredStories();
+
   // Styles
   const styles = {
     container: {
