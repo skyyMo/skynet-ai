@@ -1,0 +1,888 @@
+import React, { useState, useEffect } from 'react';
+
+function App() {
+  const [transcripts, setTranscripts] = useState([]);
+  const [processedStories, setProcessedStories] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [processingId, setProcessingId] = useState(null);
+  const [activeTab, setActiveTab] = useState('transcripts');
+  const [error, setError] = useState('');
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+
+  const loadTranscripts = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const response = await fetch('/api/transcripts');
+      const data = await response.json();
+      
+      if (response.ok) {
+        setTranscripts(data);
+        console.log(`Loaded ${data.length} transcripts`);
+      } else {
+        setError(data.error || 'Failed to load transcripts');
+      }
+    } catch (err) {
+      setError('Cannot connect to server. Make sure it\'s running.');
+      console.error('Error loading transcripts:', err);
+    }
+    setLoading(false);
+  };
+
+  const processTranscript = async (transcript) => {
+    setProcessingId(transcript.id);
+    setError('');
+    
+    try {
+      const response = await fetch('/api/process-transcript', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          transcript: transcript.content,
+          title: transcript.title 
+        })
+      });
+      
+      const result = await response.json();
+      
+      if (response.ok && result.stories) {
+        setProcessedStories(prev => [...prev, ...result.stories]);
+        setTranscripts(prev => prev.map(t => 
+          t.id === transcript.id ? {...t, processed: true} : t
+        ));
+        setActiveTab('stories');
+        
+        const highConfidenceStories = result.stories.filter(s => s.confidence >= 0.7);
+        alert(`🤖 SkyNet Mission Complete! 🚀\n\n` +
+              `Generated ${result.stories.length} autonomous dev stories from "${transcript.title}"\n` +
+              `${highConfidenceStories.length} high-confidence stories ready for deployment.\n\n` +
+              `SkyNet efficiency: ${Math.round((highConfidenceStories.length / result.stories.length) * 100)}%`);
+      } else {
+        setError(result.error || 'Failed to process transcript');
+        alert('❌ Error: ' + (result.error || 'Failed to process transcript'));
+      }
+    } catch (err) {
+      setError('Failed to process transcript: ' + err.message);
+      alert('❌ Error: ' + err.message);
+    }
+    
+    setProcessingId(null);
+  };
+
+  const processMultiple = async () => {
+    const unprocessed = transcripts.filter(t => !t.processed).slice(0, 3);
+    setLoading(true);
+    
+    for (const transcript of unprocessed) {
+      await processTranscript(transcript);
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+    
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    loadTranscripts();
+    
+    // Add SkyNet animations to the document
+    const style = document.createElement('style');
+    style.textContent = `
+      @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.5; }
+      }
+      
+      @keyframes rotate {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+      }
+      
+      @keyframes spin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+      }
+      
+      @keyframes bounce {
+        0%, 20%, 50%, 80%, 100% { transform: translateY(0); }
+        40% { transform: translateY(-10px); }
+        60% { transform: translateY(-5px); }
+      }
+      
+      @keyframes glow {
+        from { box-shadow: 0 0 20px rgba(59, 130, 246, 0.5); }
+        to { box-shadow: 0 0 30px rgba(59, 130, 246, 0.8), 0 0 40px rgba(139, 92, 246, 0.3); }
+      }
+      
+      @keyframes skynetPulse {
+        0% { 
+          background-position: 0% 50%;
+          box-shadow: 0 0 25px rgba(59, 130, 246, 0.7);
+        }
+        50% { 
+          background-position: 100% 50%;
+          box-shadow: 0 0 35px rgba(139, 92, 246, 0.9), 0 0 50px rgba(59, 130, 246, 0.5);
+        }
+        100% { 
+          background-position: 0% 50%;
+          box-shadow: 0 0 25px rgba(59, 130, 246, 0.7);
+        }
+      }
+      
+      @keyframes shimmer {
+        0% { background-position: -200% 0; }
+        100% { background-position: 200% 0; }
+      }
+      
+      @keyframes float {
+        0%, 100% { transform: translateY(0px); }
+        50% { transform: translateY(-20px); }
+      }
+    `;
+    document.head.appendChild(style);
+    
+    return () => {
+      document.head.removeChild(style);
+    };
+  }, []);
+
+  const formatDate = (dateString) => {
+    return new Date(dateString).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
+
+  const getConfidenceColor = (confidence) => {
+    if (confidence >= 0.9) return '#22c55e';
+    if (confidence >= 0.8) return '#3b82f6';
+    if (confidence >= 0.7) return '#eab308';
+    return '#ef4444';
+  };
+
+  const getPriorityColor = (priority) => {
+    switch(priority) {
+      case 'High': return '#ef4444';
+      case 'Medium': return '#eab308';
+      case 'Low': return '#22c55e';
+      default: return '#6b7280';
+    }
+  };
+
+  // Styles
+  const styles = {
+    container: {
+      minHeight: '100vh',
+      backgroundColor: '#111827',
+      color: 'white',
+      display: 'flex',
+      fontFamily: 'system-ui, -apple-system, sans-serif'
+    },
+    sidebar: {
+      width: sidebarOpen ? '256px' : '64px',
+      backgroundColor: '#1f2937',
+      borderRight: '1px solid #374151',
+      transition: 'width 0.3s ease',
+      display: 'flex',
+      flexDirection: 'column'
+    },
+    sidebarHeader: {
+      padding: '16px',
+      borderBottom: '1px solid #374151',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '12px'
+    },
+    logo: {
+      width: '32px',
+      height: '32px',
+      backgroundColor: '#3b82f6',
+      borderRadius: '8px',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      fontSize: '16px'
+    },
+    nav: {
+      flex: 1,
+      padding: '16px'
+    },
+    navButton: {
+      width: '100%',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '12px',
+      padding: '8px 12px',
+      borderRadius: '8px',
+      border: 'none',
+      background: 'none',
+      color: '#9ca3af',
+      cursor: 'pointer',
+      marginBottom: '8px',
+      transition: 'all 0.2s ease'
+    },
+    navButtonActive: {
+      backgroundColor: '#374151',
+      color: '#60a5fa'
+    },
+    mainContent: {
+      flex: 1,
+      display: 'flex',
+      flexDirection: 'column'
+    },
+    topBar: {
+      backgroundColor: '#1f2937',
+      borderBottom: '1px solid #374151',
+      padding: '16px 24px',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between'
+    },
+    content: {
+      flex: 1,
+      padding: '24px',
+      overflow: 'auto'
+    },
+    card: {
+      backgroundColor: '#1f2937',
+      border: '1px solid #374151',
+      borderRadius: '8px',
+      padding: '24px',
+      marginBottom: '16px',
+      transition: 'border-color 0.2s ease'
+    },
+    button: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '8px',
+      padding: '8px 16px',
+      borderRadius: '6px',
+      border: 'none',
+      cursor: 'pointer',
+      fontSize: '14px',
+      transition: 'all 0.2s ease'
+    },
+    buttonPrimary: {
+      backgroundColor: '#3b82f6',
+      color: 'white'
+    },
+    buttonSuccess: {
+      backgroundColor: '#22c55e',
+      color: 'white'
+    },
+    buttonSecondary: {
+      backgroundColor: '#374151',
+      color: '#d1d5db'
+    },
+    error: {
+      backgroundColor: 'rgba(185, 28, 28, 0.3)',
+      border: '1px solid #dc2626',
+      borderRadius: '8px',
+      padding: '16px',
+      marginBottom: '24px',
+      color: '#fca5a5'
+    },
+    badge: {
+      padding: '4px 12px',
+      borderRadius: '20px',
+      fontSize: '12px',
+      fontWeight: '600',
+      marginRight: '8px'
+    },
+    details: {
+      marginTop: '16px'
+    },
+    summary: {
+      cursor: 'pointer',
+      padding: '12px',
+      backgroundColor: '#374151',
+      borderRadius: '6px',
+      listStyle: 'none',
+      transition: 'background-color 0.2s ease'
+    },
+    detailsContent: {
+      marginTop: '12px',
+      padding: '16px',
+      backgroundColor: '#111827',
+      borderRadius: '6px',
+      maxHeight: '256px',
+      overflow: 'auto'
+    },
+    pre: {
+      fontSize: '14px',
+      color: '#d1d5db',
+      whiteSpace: 'pre-wrap',
+      fontFamily: 'monospace',
+      lineHeight: '1.5',
+      margin: 0
+    }
+  };
+
+  return (
+    <div style={styles.container}>
+      {/* Sidebar */}
+      <div style={styles.sidebar}>
+        <div style={styles.sidebarHeader}>
+          <div style={{
+            ...styles.logo,
+            background: 'linear-gradient(135deg, #3b82f6, #8b5cf6)',
+            animation: processingId ? 'pulse 2s infinite' : 'none'
+          }}>
+            <div style={{
+              fontSize: '18px',
+              fontWeight: 'bold',
+              color: 'white',
+              textShadow: '0 0 10px rgba(255,255,255,0.5)'
+            }}>
+              🤖
+            </div>
+          </div>
+          {sidebarOpen && (
+            <div>
+              <h1 style={{ 
+                margin: 0, 
+                fontWeight: 'bold', 
+                fontSize: '18px',
+                background: 'linear-gradient(135deg, #3b82f6, #8b5cf6)',
+                backgroundClip: 'text',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+                textShadow: processingId ? '0 0 20px rgba(59, 130, 246, 0.5)' : 'none'
+              }}>
+                SkyNet AI
+              </h1>
+              <p style={{ 
+                margin: 0, 
+                fontSize: '12px', 
+                color: '#9ca3af',
+                fontWeight: '500',
+                letterSpacing: '0.5px'
+              }}>
+                Autonomous Dev Stories
+              </p>
+            </div>
+          )}
+        </div>
+
+        <div style={styles.nav}>
+          <button
+            onClick={() => setActiveTab('transcripts')}
+            style={{
+              ...styles.navButton,
+              ...(activeTab === 'transcripts' ? styles.navButtonActive : {})
+            }}
+            onMouseEnter={(e) => {
+              if (activeTab !== 'transcripts') {
+                e.target.style.backgroundColor = '#374151';
+                e.target.style.color = 'white';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (activeTab !== 'transcripts') {
+                e.target.style.backgroundColor = 'transparent';
+                e.target.style.color = '#9ca3af';
+              }
+            }}
+          >
+            <span>👥</span>
+            {sidebarOpen && <span>Transcripts</span>}
+            {sidebarOpen && (
+              <span style={{
+                marginLeft: 'auto',
+                backgroundColor: '#4b5563',
+                fontSize: '12px',
+                padding: '2px 8px',
+                borderRadius: '9999px'
+              }}>
+                {transcripts.length}
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => setActiveTab('stories')}
+            style={{
+              ...styles.navButton,
+              ...(activeTab === 'stories' ? styles.navButtonActive : {})
+            }}
+            onMouseEnter={(e) => {
+              if (activeTab !== 'stories') {
+                e.target.style.backgroundColor = '#374151';
+                e.target.style.color = 'white';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (activeTab !== 'stories') {
+                e.target.style.backgroundColor = 'transparent';
+                e.target.style.color = '#9ca3af';
+              }
+            }}
+          >
+            <span>⭐</span>
+            {sidebarOpen && <span>Dev Stories</span>}
+            {sidebarOpen && (
+              <span style={{
+                marginLeft: 'auto',
+                backgroundColor: '#4b5563',
+                fontSize: '12px',
+                padding: '2px 8px',
+                borderRadius: '9999px'
+              }}>
+                {processedStories.length}
+              </span>
+            )}
+          </button>
+
+          {sidebarOpen && (
+            <div style={{ marginTop: '32px' }}>
+              <h3 style={{ 
+                fontSize: '14px', 
+                fontWeight: '500', 
+                color: '#9ca3af',
+                textTransform: 'uppercase',
+                letterSpacing: '0.05em',
+                marginBottom: '12px'
+              }}>
+                Statistics
+              </h3>
+              
+              <div style={{
+                backgroundColor: '#374151',
+                borderRadius: '8px',
+                padding: '12px',
+                marginBottom: '12px'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: '14px', color: '#d1d5db' }}>Total Processed</span>
+                  <span style={{ fontWeight: 'bold', color: '#60a5fa' }}>
+                    {transcripts.filter(t => t.processed).length}
+                  </span>
+                </div>
+              </div>
+
+              <div style={{
+                backgroundColor: '#374151',
+                borderRadius: '8px',
+                padding: '12px'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: '14px', color: '#d1d5db' }}>High Confidence</span>
+                  <span style={{ fontWeight: 'bold', color: '#34d399' }}>
+                    {processedStories.filter(s => s.confidence >= 0.8).length}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div style={{ padding: '16px', borderTop: '1px solid #374151' }}>
+          <button
+            onClick={() => setSidebarOpen(!sidebarOpen)}
+            style={{
+              ...styles.button,
+              ...styles.buttonSecondary,
+              width: '100%',
+              justifyContent: 'center'
+            }}
+          >
+            <span>☰</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Main Content */}
+      <div style={styles.mainContent}>
+        <div style={styles.topBar}>
+          <div>
+            <h1 style={{ 
+              margin: 0, 
+              fontSize: '24px', 
+              fontWeight: 'bold',
+              background: 'linear-gradient(135deg, #3b82f6, #8b5cf6)',
+              backgroundClip: 'text',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px'
+            }}>
+              <span style={{
+                fontSize: '28px',
+                animation: processingId ? 'rotate 2s linear infinite' : 'none',
+                filter: processingId ? 'drop-shadow(0 0 10px #3b82f6)' : 'none'
+              }}>
+                🤖
+              </span>
+              SkyNet AI
+              {activeTab === 'transcripts' ? ' - Transcripts' : ' - Dev Stories'}
+            </h1>
+            <p style={{ margin: 0, fontSize: '14px', color: '#9ca3af' }}>
+              {activeTab === 'transcripts' 
+                ? 'Autonomous extraction from your Fathom meeting transcripts'
+                : 'AI-generated development stories ready for deployment'
+              }
+            </p>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <button
+              onClick={loadTranscripts}
+              disabled={loading}
+              style={{
+                ...styles.button,
+                ...styles.buttonPrimary,
+                opacity: loading ? 0.5 : 1,
+                cursor: loading ? 'not-allowed' : 'pointer',
+                background: loading 
+                  ? 'linear-gradient(45deg, #3b82f6, #8b5cf6)' 
+                  : 'linear-gradient(135deg, #3b82f6, #1d4ed8)',
+                boxShadow: loading ? '0 0 20px rgba(59, 130, 246, 0.5)' : 'none',
+                animation: loading ? 'glow 1.5s ease-in-out infinite alternate' : 'none'
+              }}
+            >
+              <span style={{
+                animation: loading ? 'spin 1s linear infinite' : 'none'
+              }}>
+                ⚡
+              </span>
+              {loading ? 'SkyNet Processing...' : 'Refresh Data'}
+            </button>
+
+            {activeTab === 'transcripts' && (
+              <button
+                onClick={processMultiple}
+                disabled={loading || transcripts.filter(t => !t.processed).length === 0}
+                style={{
+                  ...styles.button,
+                  background: 'linear-gradient(135deg, #22c55e, #16a34a)',
+                  color: 'white',
+                  opacity: (loading || transcripts.filter(t => !t.processed).length === 0) ? 0.5 : 1,
+                  cursor: (loading || transcripts.filter(t => !t.processed).length === 0) ? 'not-allowed' : 'pointer',
+                  boxShadow: loading ? '0 0 20px rgba(34, 197, 94, 0.5)' : 'none',
+                  animation: loading ? 'pulse 2s infinite' : 'none'
+                }}
+              >
+                <span style={{
+                  animation: loading ? 'bounce 1s infinite' : 'none'
+                }}>
+                  🤖
+                </span>
+                Deploy SkyNet ({transcripts.filter(t => !t.processed).slice(0, 3).length})
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div style={styles.content}>
+          {error && (
+            <div style={styles.error}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span>⚠️</span>
+                <span style={{ fontWeight: '500' }}>Error:</span>
+                <span>{error}</span>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'transcripts' && (
+            <div>
+              {transcripts.map(transcript => (
+                <div key={transcript.id} style={{
+                  ...styles.card,
+                  ':hover': { borderColor: '#4b5563' }
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '16px' }}>
+                    <div style={{ flex: 1 }}>
+                      <h3 style={{ margin: '0 0 8px 0', fontSize: '18px', fontWeight: '600' }}>
+                        {transcript.title}
+                      </h3>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '16px', fontSize: '14px', color: '#9ca3af' }}>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          <span>🕐</span>
+                          {formatDate(transcript.createdTime)}
+                        </span>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          <span>👥</span>
+                          {transcript.wordCount} words
+                        </span>
+                        {transcript.processed && (
+                          <span style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#34d399' }}>
+                            <span>✅</span>
+                            Processed
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    
+                    <button
+                      onClick={() => processTranscript(transcript)}
+                      disabled={transcript.processed || processingId === transcript.id}
+                      style={{
+                        ...styles.button,
+                        background: transcript.processed 
+                          ? 'linear-gradient(135deg, #4b5563, #6b7280)' 
+                          : processingId === transcript.id
+                            ? 'linear-gradient(45deg, #3b82f6, #8b5cf6, #3b82f6)'
+                            : 'linear-gradient(135deg, #3b82f6, #1d4ed8)',
+                        backgroundSize: processingId === transcript.id ? '200% 200%' : '100% 100%',
+                        animation: processingId === transcript.id ? 'skynetPulse 2s ease-in-out infinite' : 'none',
+                        color: transcript.processed ? '#9ca3af' : 'white',
+                        cursor: (transcript.processed || processingId === transcript.id) ? 'not-allowed' : 'pointer',
+                        boxShadow: processingId === transcript.id ? '0 0 25px rgba(59, 130, 246, 0.7)' : 'none',
+                        border: processingId === transcript.id ? '2px solid rgba(59, 130, 246, 0.5)' : 'none'
+                      }}
+                    >
+                      {processingId === transcript.id ? (
+                        <>
+                          <span style={{
+                            animation: 'rotate 1s linear infinite',
+                            filter: 'drop-shadow(0 0 5px #fff)'
+                          }}>
+                            🤖
+                          </span>
+                          <span style={{
+                            background: 'linear-gradient(45deg, #fff, #60a5fa, #fff)',
+                            backgroundSize: '200% 200%',
+                            animation: 'shimmer 1.5s ease-in-out infinite',
+                            backgroundClip: 'text',
+                            WebkitBackgroundClip: 'text',
+                            WebkitTextFillColor: 'transparent'
+                          }}>
+                            SkyNet Analyzing...
+                          </span>
+                        </>
+                      ) : transcript.processed ? (
+                        <>
+                          <span>✅</span>
+                          Mission Complete
+                        </>
+                      ) : (
+                        <>
+                          <span>🚀</span>
+                          Activate SkyNet
+                        </>
+                      )}
+                    </button>
+                  </div>
+                  
+                  <details style={styles.details}>
+                    <summary style={styles.summary}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ fontSize: '14px', fontWeight: '500' }}>View Transcript Content</span>
+                        <span>▶</span>
+                      </div>
+                    </summary>
+                    <div style={styles.detailsContent}>
+                      <pre style={styles.pre}>
+                        {transcript.content?.substring(0, 1000)}
+                        {transcript.content?.length > 1000 && '...'}
+                      </pre>
+                    </div>
+                  </details>
+                </div>
+              ))}
+
+              {transcripts.length === 0 && !loading && (
+                <div style={{ textAlign: 'center', padding: '64px' }}>
+                  <div style={{ 
+                    fontSize: '64px', 
+                    marginBottom: '16px',
+                    animation: 'float 3s ease-in-out infinite'
+                  }}>
+                    🤖
+                  </div>
+                  <h3 style={{ 
+                    fontSize: '18px', 
+                    fontWeight: '500', 
+                    color: '#9ca3af', 
+                    marginBottom: '8px',
+                    background: 'linear-gradient(135deg, #3b82f6, #8b5cf6)',
+                    backgroundClip: 'text',
+                    WebkitBackgroundClip: 'text',
+                    WebkitTextFillColor: 'transparent'
+                  }}>
+                    SkyNet Awaiting Data
+                  </h3>
+                  <p style={{ color: '#6b7280' }}>
+                    Connect your Notion database to begin autonomous story generation.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'stories' && (
+            <div>
+              {processedStories.map(story => (
+                <div key={story.id} style={styles.card}>
+                  <div style={{ marginBottom: '16px' }}>
+                    <h3 style={{ margin: '0 0 12px 0', fontSize: '18px', fontWeight: '600' }}>
+                      {story.title}
+                    </h3>
+                    
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px', flexWrap: 'wrap' }}>
+                      <span style={{
+                        ...styles.badge,
+                        backgroundColor: getPriorityColor(story.priority) + '33',
+                        color: getPriorityColor(story.priority),
+                        border: `1px solid ${getPriorityColor(story.priority)}66`
+                      }}>
+                        {story.priority} Priority
+                      </span>
+                      <span style={{
+                        ...styles.badge,
+                        backgroundColor: '#374151',
+                        color: '#d1d5db'
+                      }}>
+                        {story.type}
+                      </span>
+                      <span style={{
+                        ...styles.badge,
+                        backgroundColor: '#581c87',
+                        color: '#c084fc'
+                      }}>
+                        {story.effort}
+                      </span>
+                      <span style={{
+                        ...styles.badge,
+                        backgroundColor: getConfidenceColor(story.confidence) + '33',
+                        color: getConfidenceColor(story.confidence),
+                        border: `1px solid ${getConfidenceColor(story.confidence)}66`
+                      }}>
+                        {Math.round(story.confidence * 100)}% confidence
+                      </span>
+                    </div>
+                    
+                    <div style={{ fontSize: '12px', color: '#6b7280' }}>
+                      From: {story.sourceTranscript} • {story.sourceTimestamp}
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', marginBottom: '24px' }}>
+                    <div>
+                      <h4 style={{ margin: '0 0 8px 0', fontSize: '14px', fontWeight: '600', color: '#d1d5db' }}>
+                        📋 Description
+                      </h4>
+                      <p style={{ fontSize: '14px', color: '#9ca3af', lineHeight: '1.5', marginBottom: '16px' }}>
+                        {story.description}
+                      </p>
+                      
+                      <h4 style={{ margin: '0 0 8px 0', fontSize: '14px', fontWeight: '600', color: '#d1d5db' }}>
+                        💰 Business Value
+                      </h4>
+                      <p style={{ fontSize: '14px', color: '#9ca3af', lineHeight: '1.5', marginBottom: '16px' }}>
+                        {story.businessValue}
+                      </p>
+
+                      <h4 style={{ margin: '0 0 8px 0', fontSize: '14px', fontWeight: '600', color: '#d1d5db' }}>
+                        ✅ Acceptance Criteria
+                      </h4>
+                      <ul style={{ margin: 0, padding: '0 0 0 16px' }}>
+                        {story.acceptanceCriteria?.map((criteria, idx) => (
+                          <li key={idx} style={{ fontSize: '14px', color: '#9ca3af', marginBottom: '4px' }}>
+                            {criteria}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+
+                    <div>
+                      <h4 style={{ margin: '0 0 8px 0', fontSize: '14px', fontWeight: '600', color: '#d1d5db' }}>
+                        ⚙️ Technical Requirements
+                      </h4>
+                      <ul style={{ margin: '0 0 16px 0', padding: '0 0 0 16px' }}>
+                        {story.technicalRequirements?.map((req, idx) => (
+                          <li key={idx} style={{ fontSize: '14px', color: '#9ca3af', marginBottom: '4px' }}>
+                            {req}
+                          </li>
+                        ))}
+                      </ul>
+
+                      <h4 style={{ margin: '0 0 8px 0', fontSize: '14px', fontWeight: '600', color: '#d1d5db' }}>
+                        ⚠️ Risks
+                      </h4>
+                      <ul style={{ margin: '0 0 16px 0', padding: '0 0 0 16px' }}>
+                        {story.risks?.map((risk, idx) => (
+                          <li key={idx} style={{ fontSize: '14px', color: '#ef4444', marginBottom: '4px' }}>
+                            {risk}
+                          </li>
+                        ))}
+                      </ul>
+
+                      {story.discussionContext && (
+                        <div>
+                          <h4 style={{ margin: '0 0 8px 0', fontSize: '14px', fontWeight: '600', color: '#d1d5db' }}>
+                            💬 Discussion Context
+                          </h4>
+                          <p style={{ fontSize: '14px', color: '#9ca3af', lineHeight: '1.5', fontStyle: 'italic' }}>
+                            "{story.discussionContext}"
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div style={{ 
+                    display: 'flex', 
+                    justifyContent: 'flex-end', 
+                    gap: '12px', 
+                    paddingTop: '16px', 
+                    borderTop: '1px solid #374151' 
+                  }}>
+                    <button style={{
+                      ...styles.button,
+                      background: 'linear-gradient(135deg, #374151, #4b5563)',
+                      color: '#d1d5db',
+                      border: '1px solid #6b7280'
+                    }}>
+                      ✏️ Modify Parameters
+                    </button>
+                    <button style={{
+                      ...styles.button,
+                      background: 'linear-gradient(135deg, #3b82f6, #1d4ed8)',
+                      color: 'white',
+                      boxShadow: '0 4px 15px rgba(59, 130, 246, 0.3)'
+                    }}>
+                      🚀 Deploy to JIRA
+                    </button>
+                  </div>
+                </div>
+              ))}
+
+              {processedStories.length === 0 && (
+                <div style={{ textAlign: 'center', padding: '64px' }}>
+                  <div style={{ 
+                    fontSize: '64px', 
+                    marginBottom: '16px',
+                    animation: 'pulse 2s infinite'
+                  }}>
+                    🤖
+                  </div>
+                  <h3 style={{ 
+                    fontSize: '18px', 
+                    fontWeight: '500', 
+                    color: '#9ca3af', 
+                    marginBottom: '8px',
+                    background: 'linear-gradient(135deg, #3b82f6, #8b5cf6)',
+                    backgroundClip: 'text',
+                    WebkitBackgroundClip: 'text',
+                    WebkitTextFillColor: 'transparent'
+                  }}>
+                    SkyNet Learning Module Empty
+                  </h3>
+                  <p style={{ color: '#6b7280' }}>
+                    Activate SkyNet on transcripts to generate autonomous development stories.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default App;
