@@ -1,6 +1,6 @@
-const path = require('path');
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
 const { Client } = require('@notionhq/client');
 require('dotenv').config();
 
@@ -14,40 +14,36 @@ app.use(express.json());
 // Serve static files from React build in production
 if (process.env.NODE_ENV === 'production') {
   app.use(express.static(path.join(__dirname, '../client/build')));
-  
-  // Catch all handler for React Router
-  app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, '../client/build', 'index.html'));
-  });
 }
 
 // Initialize Notion
-const notion = new Client({
-  auth: process.env.NOTION_TOKEN
+const notion = new Client({ 
+  auth: process.env.NOTION_TOKEN 
 });
 
 // Test route
 app.get('/api/health', (req, res) => {
-  res.json({
-    status: 'Server is running!',
-    timestamp: new Date().toISOString()
+  res.json({ 
+    status: 'SkyNet AI is online and operational! 🤖',
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development'
   });
 });
 
 // Get transcripts from Notion
 app.get('/api/transcripts', async (req, res) => {
   try {
-    console.log('Fetching transcripts...');
-
+    console.log('SkyNet fetching transcripts...');
+    
     if (!process.env.NOTION_TOKEN) {
-      return res.status(400).json({
-        error: 'NOTION_TOKEN not found in environment variables'
+      return res.status(400).json({ 
+        error: 'NOTION_TOKEN not found in environment variables' 
       });
     }
 
     if (!process.env.NOTION_DATABASE_ID) {
-      return res.status(400).json({
-        error: 'NOTION_DATABASE_ID not found in environment variables'
+      return res.status(400).json({ 
+        error: 'NOTION_DATABASE_ID not found in environment variables' 
       });
     }
 
@@ -59,23 +55,23 @@ app.get('/api/transcripts', async (req, res) => {
           direction: 'descending'
         }
       ],
-      page_size: 10 // Limit to recent 10 for testing
+      page_size: 20 // Limit to recent 20 for performance
     });
-
+    
     console.log(`Found ${response.results.length} pages`);
-
+    
     // Get basic info AND page content
     const transcriptPromises = response.results.map(async (page) => {
       const properties = page.properties;
-
+      
       try {
         // Fetch the actual page content
         console.log(`Fetching content for: ${properties.Name?.title?.[0]?.plain_text}`);
-
+        
         const pageContent = await notion.blocks.children.list({
           block_id: page.id,
         });
-
+        
         // Extract text from all blocks
         let content = '';
         pageContent.results.forEach(block => {
@@ -102,7 +98,7 @@ app.get('/api/transcripts', async (req, res) => {
               .join('') + '\n';
           }
         });
-
+        
         return {
           id: page.id,
           title: properties.Name?.title?.[0]?.plain_text || 'Untitled Meeting',
@@ -126,20 +122,20 @@ app.get('/api/transcripts', async (req, res) => {
         };
       }
     });
-
+    
     const transcripts = await Promise.all(transcriptPromises);
-
+    
     // Filter out transcripts with no content (less than 50 words)
     const validTranscripts = transcripts.filter(t => t.wordCount > 50);
-
+    
     console.log(`Returning ${validTranscripts.length} transcripts with content`);
-
+    
     res.json(validTranscripts);
   } catch (error) {
     console.error('Notion API Error:', error);
-    res.status(500).json({
+    res.status(500).json({ 
       error: 'Failed to fetch transcripts',
-      details: error.message
+      details: error.message 
     });
   }
 });
@@ -151,7 +147,7 @@ app.post('/api/process-transcript', async (req, res) => {
     
     if (!process.env.OPENAI_API_KEY) {
       return res.status(400).json({ 
-        error: 'OpenAI API key not configured. Add OPENAI_API_KEY to your .env file' 
+        error: 'OpenAI API key not configured. Add OPENAI_API_KEY to your environment variables' 
       });
     }
 
@@ -161,7 +157,7 @@ app.post('/api/process-transcript', async (req, res) => {
       });
     }
 
-    console.log(`Processing transcript: ${title}`);
+    console.log(`SkyNet processing transcript: ${title}`);
     console.log(`Transcript length: ${transcript.length} characters`);
 
     // Initialize OpenAI
@@ -170,7 +166,7 @@ app.post('/api/process-transcript', async (req, res) => {
       apiKey: process.env.OPENAI_API_KEY 
     });
 
-    const systemPrompt = `You are an expert product manager and software architect. Extract ALL actionable development stories from meeting transcripts.
+    const systemPrompt = `You are SkyNet AI, an autonomous system for extracting development stories from meeting transcripts.
 
 IMPORTANT: Return ONLY valid JSON - no markdown, no code blocks, no additional text.
 
@@ -219,7 +215,7 @@ Each story should be actionable and specific. If multiple related items are disc
         }
       ],
       temperature: 0.2,
-      max_tokens: 3000 // Increased for multiple stories
+      max_tokens: 3000
     });
     
     const rawResponse = completion.choices[0].message.content;
@@ -252,7 +248,7 @@ Each story should be actionable and specific. If multiple related items are disc
           sourceTimestamp: new Date().toISOString().split('T')[0]
         }));
         
-        console.log(`Generated ${result.stories.length} stories from transcript`);
+        console.log(`SkyNet generated ${result.stories.length} stories from transcript`);
       } else {
         throw new Error('Invalid response format - expected stories array');
       }
@@ -261,7 +257,7 @@ Each story should be actionable and specific. If multiple related items are disc
       console.error('Failed to parse OpenAI response:', parseError);
       console.error('Raw response was:', rawResponse);
       return res.status(500).json({ 
-        error: 'AI returned invalid format. Check server logs for details.',
+        error: 'SkyNet AI returned invalid format. Check server logs for details.',
         details: rawResponse.substring(0, 200) + '...'
       });
     }
@@ -270,17 +266,25 @@ Each story should be actionable and specific. If multiple related items are disc
   } catch (error) {
     console.error('OpenAI API Error:', error);
     res.status(500).json({ 
-      error: 'Failed to process transcript: ' + error.message,
+      error: 'SkyNet AI processing failed: ' + error.message,
       details: error.response?.data || error.message 
     });
   }
 });
 
+// Catch all handler for React Router in production
+if (process.env.NODE_ENV === 'production') {
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, '../client/build', 'index.html'));
+  });
+}
 
+// Start server
 app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
-  console.log(`Test it: http://localhost:${port}/api/health`);
-  console.log(`Environment variables loaded:`, {
+  console.log(`🤖 SkyNet AI server operational on port ${port}`);
+  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`Health check: http://localhost:${port}/api/health`);
+  console.log('Environment variables loaded:', {
     hasNotionToken: !!process.env.NOTION_TOKEN,
     hasNotionDB: !!process.env.NOTION_DATABASE_ID,
     hasOpenAI: !!process.env.OPENAI_API_KEY
