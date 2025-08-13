@@ -272,74 +272,177 @@ Each story should be actionable and specific. If multiple related items are disc
   }
 });
 
-// Test JIRA connection
-app.post('/api/test-jira', async (req, res) => {
+// Deploy story to JIRA - Fixed with better error handling and auth testing
+app.post('/api/deploy-to-jira', async (req, res) => {
   try {
-    const { jiraConfig } = req.body;
+    const { story, jiraConfig } = req.body;
     
-    console.log(`🧪 Testing JIRA connection...`);
-    
-    const cleanUrl = jiraConfig.url.replace(/\/$/, '');
+    console.log(`🤖 SkyNet attempting JIRA deployment for: ${story.title}`);
+    console.log(`URL: ${jiraConfig.url}`);
+    console.log(`Email: ${jiraConfig.email}`);
+    console.log(`Project: ${jiraConfig.projectKey}`);
+
+    // Clean and validate URL
+    let cleanUrl = jiraConfig.url.trim();
+    if (!cleanUrl.startsWith('http')) {
+      cleanUrl = 'https://' + cleanUrl;
+    }
+    cleanUrl = cleanUrl.replace(/\/$/, ''); // Remove trailing slash
+
+    console.log(`Cleaned URL: ${cleanUrl}`);
+
     const auth = Buffer.from(`${jiraConfig.email}:${jiraConfig.token}`).toString('base64');
     
-    // Test authentication
-    const authResponse = await fetch(`${cleanUrl}/rest/api/3/myself`, {
+    // Step 1: Test basic authentication first
+    console.log(`🧪 Testing JIRA authentication...`);
+    const authTest = await fetch(`${cleanUrl}/rest/api/3/myself`, {
       method: 'GET',
       headers: {
         'Authorization': `Basic ${auth}`,
-        'Accept': 'application/json'
+        'Accept': 'application/json',
+        'User-Agent': 'SkyNet-AI/1.0'
       }
     });
 
-    if (!authResponse.ok) {
-      const errorText = await authResponse.text();
-      if (authResponse.status === 401) {
-        throw new Error('Authentication failed. Check your email and API token.');
-      } else if (authResponse.status === 404) {
-        throw new Error('JIRA URL not found. Check your URL format.');
-      } else {
-        throw new Error(`Connection failed (${authResponse.status}): ${errorText}`);
+    const authTestText = await authTest.text();
+    console.log(`Auth test status: ${authTest.status}`);
+    console.log(`Auth test response: ${authTestText.substring(0, 200)}...`);
+
+    if (!authTest.ok) {
+      if (authTestText.includes('<!DOCTYPE')) {
+        throw new Error(`JIRA URL error: Received HTML instead of JSON. Please check your JIRA URL format. Expected: https://yourcompany.atlassian.net`);
       }
+      if (authTest.status === 401) {
+        throw new Error('JIRA Authentication failed. Please verify your email and API token are correct.');
+      }
+      if (authTest.status === 404) {
+        throw new Error(`JIRA URL not found (404). Please verify your JIRA URL: ${cleanUrl}`);
+      }
+      throw new Error(`JIRA connection failed (${authTest.status}): ${authTestText.substring(0, 100)}`);
     }
 
-    const userInfo = await authResponse.json();
-    
-    // Test project access
-    const projectResponse = await fetch(`${cleanUrl}/rest/api/3/project/${jiraConfig.projectKey}`, {
+    let userInfo;
+    try {
+      userInfo = JSON.parse(authTestText);
+      console.log(`✅ Authentication successful for user: ${userInfo.displayName}`);
+    } catch (e) {
+      throw new Error('JIRA returned invalid response format');
+    }
+
+    // Step 2: Test project access
+    console.log(`🔍 Testing project access for: ${jiraConfig.projectKey}`);
+    const projectTest = await fetch(`${cleanUrl}/rest/api/3/project/${jiraConfig.projectKey}`, {
       method: 'GET',
       headers: {
         'Authorization': `Basic ${auth}`,
-        'Accept': 'application/json'
+        'Accept': 'application/json',
+        'User-Agent': 'SkyNet-AI/1.0'
       }
     });
 
-    if (!projectResponse.ok) {
-      if (projectResponse.status === 404) {
-        throw new Error(`Project "${jiraConfig.projectKey}" not found or you don't have access.`);
-      } else {
-        throw new Error(`Project access test failed (${projectResponse.status})`);
+    if (!projectTest.ok) {
+      if (projectTest.status === 404) {
+        throw new Error(`Project "${jiraConfig.projectKey}" not found. Please verify the project key is correct and you have access.`);
       }
+      throw new Error(`Project access failed (${projectTest.status}). Please verify you have access to project "${jiraConfig.projectKey}".`);
     }
 
-    const projectInfo = await projectResponse.json();
-
-    console.log(`✅ JIRA connection successful for user: ${userInfo.displayName}`);
+    // Step 3: Create the ticket with simple text description
+    console.log(`🎫 Creating JIRA ticket...`);
     
+    const description = [
+      story.description,
+      '',
+      '🎯 Business Value:',
+      story.businessValue,
+      '',
+      '✅ Acceptance Criteria:',
+      ...story.acceptanceCriteria.map(criteria => `• ${criteria}`),
+      '',
+      '⚙️ Technical Requirements:',
+      ...story.technicalRequirements.map(req => `• ${req}`),
+      '',
+      '⚠️ Risks:',
+      ...story.risks.map(risk => `• ${risk}`),
+      '',
+      `🤖 Generated by SkyNet AI from: ${story.sourceTranscript}`,
+      `Confidence: ${Math.round(story.confidence * 100)}% | Date: ${story.sourceTimestamp}`
+    ].join('\n');
+
+    const jiraTicket = {
+      fields: {
+        project: {
+          key: jiraConfig.projectKey
+        },
+        summary: story.title,
+        description: description,
+        issuetype: {
+          name: 'Story'
+        }
+      }
+    };
+
+    // Add priority if available
+    if (story.priority && ['Highest', 'High', 'Medium', 'Low', 'Lowest'].includes(story.priority)) {
+      jiraTicket.fields.priority = { name: story.priority };
+    }
+
+    console.log(`Creating ticket with summary: "${story.title}"`);
+
+    const createResponse = await fetch(`${cleanUrl}/rest/api/3/issue`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Basic ${auth}`,
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        'User-Agent': 'SkyNet-AI/1.0'
+      },
+      body: JSON.stringify(jiraTicket)
+    });
+
+    const createResponseText = await createResponse.text();
+    console.log(`Ticket creation status: ${createResponse.status}`);
+    console.log(`Ticket creation response: ${createResponseText.substring(0, 300)}...`);
+
+    if (!createResponse.ok) {
+      if (createResponseText.includes('<!DOCTYPE')) {
+        throw new Error('JIRA returned HTML instead of JSON during ticket creation. This may indicate a URL or authentication issue.');
+      }
+
+      let errorMessage = `Ticket creation failed (${createResponse.status})`;
+      try {
+        const errorData = JSON.parse(createResponseText);
+        if (errorData.errorMessages) {
+          errorMessage += `: ${errorData.errorMessages.join(', ')}`;
+        }
+        if (errorData.errors) {
+          const fieldErrors = Object.entries(errorData.errors).map(([field, error]) => `${field}: ${error}`);
+          errorMessage += `: ${fieldErrors.join(', ')}`;
+        }
+      } catch (e) {
+        errorMessage += `: ${createResponseText.substring(0, 100)}`;
+      }
+      throw new Error(errorMessage);
+    }
+
+    let result;
+    try {
+      result = JSON.parse(createResponseText);
+    } catch (e) {
+      throw new Error('JIRA returned invalid JSON for ticket creation');
+    }
+
+    console.log(`🚀 SkyNet successfully deployed ticket: ${result.key}`);
+
     res.json({
       success: true,
-      user: {
-        displayName: userInfo.displayName,
-        emailAddress: userInfo.emailAddress
-      },
-      project: {
-        name: projectInfo.name,
-        key: projectInfo.key
-      },
-      message: `Successfully connected to ${projectInfo.name} as ${userInfo.displayName}`
+      key: result.key,
+      url: `${cleanUrl}/browse/${result.key}`,
+      id: result.id
     });
 
   } catch (error) {
-    console.error('JIRA test failed:', error);
+    console.error('🚨 JIRA deployment failed:', error.message);
     res.status(500).json({ 
       error: error.message
     });
