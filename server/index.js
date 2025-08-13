@@ -272,7 +272,59 @@ Each story should be actionable and specific. If multiple related items are disc
   }
 });
 
-// Deploy story to JIRA - Fixed with better error handling and auth testing
+// Replace your existing /api/deploy-to-jira endpoint with this fixed version:
+
+// Helper function to convert plain text to Atlassian Document Format
+function textToADF(text) {
+  const lines = text.split('\n');
+  const content = [];
+  
+  for (const line of lines) {
+    if (line.trim() === '') {
+      // Empty line
+      content.push({
+        type: "paragraph",
+        content: []
+      });
+    } else if (line.startsWith('🎯 ') || line.startsWith('✅ ') || line.startsWith('⚙️ ') || line.startsWith('⚠️ ') || line.startsWith('🤖 ')) {
+      // Header lines - make them bold
+      content.push({
+        type: "paragraph",
+        content: [{
+          type: "text",
+          text: line,
+          marks: [{ type: "strong" }]
+        }]
+      });
+    } else if (line.startsWith('• ')) {
+      // Bullet points - create list items
+      content.push({
+        type: "paragraph",
+        content: [{
+          type: "text",
+          text: line
+        }]
+      });
+    } else {
+      // Regular text
+      content.push({
+        type: "paragraph",
+        content: [{
+          type: "text",
+          text: line
+        }]
+      });
+    }
+  }
+  
+  return {
+    type: "doc",
+    version: 1,
+    content: content
+  };
+}
+
+// Deploy story to JIRA - Fixed with ADF format
 app.post('/api/deploy-to-jira', async (req, res) => {
   try {
     const { story, jiraConfig } = req.body;
@@ -347,10 +399,10 @@ app.post('/api/deploy-to-jira', async (req, res) => {
       throw new Error(`Project access failed (${projectTest.status}). Please verify you have access to project "${jiraConfig.projectKey}".`);
     }
 
-    // Step 3: Create the ticket with simple text description
+    // Step 3: Create the ticket with ADF description format
     console.log(`🎫 Creating JIRA ticket...`);
     
-    const description = [
+    const descriptionText = [
       story.description,
       '',
       '🎯 Business Value:',
@@ -369,13 +421,16 @@ app.post('/api/deploy-to-jira', async (req, res) => {
       `Confidence: ${Math.round(story.confidence * 100)}% | Date: ${story.sourceTimestamp}`
     ].join('\n');
 
+    // Convert to ADF format
+    const adfDescription = textToADF(descriptionText);
+
     const jiraTicket = {
       fields: {
         project: {
           key: jiraConfig.projectKey
         },
         summary: story.title,
-        description: description,
+        description: adfDescription,  // Now in ADF format
         issuetype: {
           name: 'Story'
         }
@@ -388,6 +443,7 @@ app.post('/api/deploy-to-jira', async (req, res) => {
     }
 
     console.log(`Creating ticket with summary: "${story.title}"`);
+    console.log(`Description format: ADF with ${adfDescription.content.length} blocks`);
 
     const createResponse = await fetch(`${cleanUrl}/rest/api/3/issue`, {
       method: 'POST',
