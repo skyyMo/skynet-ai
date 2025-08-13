@@ -96,6 +96,102 @@ function App() {
     setLoading(false);
   };
 
+  const deployToJira = async (story) => {
+    if (!jiraConfig.url || !jiraConfig.email || !jiraConfig.token || !jiraConfig.projectKey) {
+      alert('🔧 Please configure JIRA settings first!');
+      setShowJiraConfig(true);
+      return;
+    }
+
+    setDeployingToJira(story.id);
+    
+    try {
+      const response = await fetch('/api/deploy-to-jira', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          story,
+          jiraConfig
+        })
+      });
+      
+      const result = await response.json();
+      
+      if (response.ok) {
+        alert(`🚀 SkyNet deployed story to JIRA!\n\nTicket: ${result.key}\nURL: ${result.url}`);
+        setProcessedStories(prev => prev.map(s => 
+          s.id === story.id ? {...s, deployedToJira: result.key} : s
+        ));
+      } else {
+        alert('❌ JIRA deployment failed: ' + result.error);
+      }
+    } catch (err) {
+      alert('❌ JIRA deployment error: ' + err.message);
+    }
+    
+    setDeployingToJira(null);
+  };
+
+  // Sorting and filtering logic
+  const getSortedAndFilteredStories = () => {
+    let stories = [...processedStories];
+
+    // Apply search filter
+    if (searchTerm) {
+      stories = stories.filter(story => 
+        story.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        story.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        story.sourceTranscript.toLowerCase().includes(searchTerm.toLowerCase())
+      );
+    }
+
+    // Apply category filter
+    switch (filterBy) {
+      case 'recommended':
+        stories = stories.filter(s => s.confidence >= 0.8 && s.priority === 'High');
+        break;
+      case 'high-confidence':
+        stories = stories.filter(s => s.confidence >= 0.8);
+        break;
+      case 'recent':
+        const twoDaysAgo = new Date();
+        twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+        stories = stories.filter(s => new Date(s.sourceTimestamp) >= twoDaysAgo);
+        break;
+      case 'needs-review':
+        stories = stories.filter(s => s.confidence < 0.7);
+        break;
+      default:
+        break;
+    }
+
+    // Apply sorting
+    switch (sortBy) {
+      case 'confidence':
+        stories.sort((a, b) => b.confidence - a.confidence);
+        break;
+      case 'priority':
+        const priorityOrder = { 'High': 3, 'Medium': 2, 'Low': 1 };
+        stories.sort((a, b) => (priorityOrder[b.priority] || 0) - (priorityOrder[a.priority] || 0));
+        break;
+      case 'effort':
+        stories.sort((a, b) => {
+          const aEffort = parseInt(a.effort) || 0;
+          const bEffort = parseInt(b.effort) || 0;
+          return aEffort - bEffort;
+        });
+        break;
+      case 'date':
+      default:
+        stories.sort((a, b) => new Date(b.sourceTimestamp) - new Date(a.sourceTimestamp));
+        break;
+    }
+
+    return stories;
+  };
+
+  const filteredAndSortedStories = getSortedAndFilteredStories();
+
   useEffect(() => {
     loadTranscripts();
     
@@ -169,101 +265,6 @@ function App() {
     });
   };
 
-  const deployToJira = async (story) => {
-    if (!jiraConfig.url || !jiraConfig.email || !jiraConfig.token || !jiraConfig.projectKey) {
-      alert('🔧 Please configure JIRA settings first!');
-      setShowJiraConfig(true);
-      return;
-    }
-
-    setDeployingToJira(story.id);
-    
-    try {
-      const response = await fetch('/api/deploy-to-jira', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          story,
-          jiraConfig
-        })
-      });
-      
-      const result = await response.json();
-      
-      if (response.ok) {
-        alert(`🚀 SkyNet deployed story to JIRA!\n\nTicket: ${result.key}\nURL: ${result.url}`);
-        // Mark story as deployed
-        setProcessedStories(prev => prev.map(s => 
-          s.id === story.id ? {...s, deployedToJira: result.key} : s
-        ));
-      } else {
-        alert('❌ JIRA deployment failed: ' + result.error);
-      }
-    } catch (err) {
-      alert('❌ JIRA deployment error: ' + err.message);
-    }
-    
-    setDeployingToJira(null);
-  };
-
-  // Sorting and filtering logic
-  const getSortedAndFilteredStories = () => {
-    let stories = [...processedStories];
-
-    // Apply search filter
-    if (searchTerm) {
-      stories = stories.filter(story => 
-        story.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        story.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        story.sourceTranscript.toLowerCase().includes(searchTerm.toLowerCase())
-      );
-    }
-
-    // Apply category filter
-    switch (filterBy) {
-      case 'recommended':
-        stories = stories.filter(s => s.confidence >= 0.8 && s.priority === 'High');
-        break;
-      case 'high-confidence':
-        stories = stories.filter(s => s.confidence >= 0.8);
-        break;
-      case 'recent':
-        const twoDaysAgo = new Date();
-        twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
-        stories = stories.filter(s => new Date(s.sourceTimestamp) >= twoDaysAgo);
-        break;
-      case 'needs-review':
-        stories = stories.filter(s => s.confidence < 0.7);
-        break;
-      default:
-        break;
-    }
-
-    // Apply sorting
-    switch (sortBy) {
-      case 'confidence':
-        stories.sort((a, b) => b.confidence - a.confidence);
-        break;
-      case 'priority':
-        const priorityOrder = { 'High': 3, 'Medium': 2, 'Low': 1 };
-        stories.sort((a, b) => (priorityOrder[b.priority] || 0) - (priorityOrder[a.priority] || 0));
-        break;
-      case 'effort':
-        stories.sort((a, b) => {
-          const aEffort = parseInt(a.effort) || 0;
-          const bEffort = parseInt(b.effort) || 0;
-          return aEffort - bEffort;
-        });
-        break;
-      case 'date':
-      default:
-        stories.sort((a, b) => new Date(b.sourceTimestamp) - new Date(a.sourceTimestamp));
-        break;
-    }
-
-    return stories;
-  };
-
   const getConfidenceColor = (confidence) => {
     if (confidence >= 0.9) return '#22c55e';
     if (confidence >= 0.8) return '#3b82f6';
@@ -279,66 +280,6 @@ function App() {
       default: return '#6b7280';
     }
   };
-
-  // Sorting and filtering logic
-  const getSortedAndFilteredStories = () => {
-    let stories = [...processedStories];
-
-    // Apply search filter
-    if (searchTerm) {
-      stories = stories.filter(story => 
-        story.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        story.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        story.sourceTranscript.toLowerCase().includes(searchTerm.toLowerCase())
-      );
-    }
-
-    // Apply category filter
-    switch (filterBy) {
-      case 'recommended':
-        stories = stories.filter(s => s.confidence >= 0.8 && s.priority === 'High');
-        break;
-      case 'high-confidence':
-        stories = stories.filter(s => s.confidence >= 0.8);
-        break;
-      case 'recent':
-        const twoDaysAgo = new Date();
-        twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
-        stories = stories.filter(s => new Date(s.sourceTimestamp) >= twoDaysAgo);
-        break;
-      case 'needs-review':
-        stories = stories.filter(s => s.confidence < 0.7);
-        break;
-      default:
-        break;
-    }
-
-    // Apply sorting
-    switch (sortBy) {
-      case 'confidence':
-        stories.sort((a, b) => b.confidence - a.confidence);
-        break;
-      case 'priority':
-        const priorityOrder = { 'High': 3, 'Medium': 2, 'Low': 1 };
-        stories.sort((a, b) => (priorityOrder[b.priority] || 0) - (priorityOrder[a.priority] || 0));
-        break;
-      case 'effort':
-        stories.sort((a, b) => {
-          const aEffort = parseInt(a.effort) || 0;
-          const bEffort = parseInt(b.effort) || 0;
-          return aEffort - bEffort;
-        });
-        break;
-      case 'date':
-      default:
-        stories.sort((a, b) => new Date(b.sourceTimestamp) - new Date(a.sourceTimestamp));
-        break;
-    }
-
-    return stories;
-  };
-
-  const filteredAndSortedStories = getSortedAndFilteredStories();
 
   // Styles
   const styles = {
@@ -634,7 +575,8 @@ function App() {
               <div style={{
                 backgroundColor: '#374151',
                 borderRadius: '8px',
-                padding: '12px'
+                padding: '12px',
+                marginBottom: '12px'
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <span style={{ fontSize: '14px', color: '#d1d5db' }}>High Confidence</span>
@@ -643,6 +585,37 @@ function App() {
                   </span>
                 </div>
               </div>
+
+              <div style={{
+                backgroundColor: '#374151',
+                borderRadius: '8px',
+                padding: '12px'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: '14px', color: '#d1d5db' }}>Recommended</span>
+                  <span style={{ fontWeight: 'bold', color: '#a855f7' }}>
+                    {processedStories.filter(s => s.confidence >= 0.8 && s.priority === 'High').length}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {sidebarOpen && (
+            <div style={{ marginTop: '24px' }}>
+              <button
+                onClick={() => setShowJiraConfig(!showJiraConfig)}
+                style={{
+                  ...styles.button,
+                  width: '100%',
+                  background: 'linear-gradient(135deg, #3b82f6, #1d4ed8)',
+                  color: 'white',
+                  justifyContent: 'center'
+                }}
+              >
+                <span>⚙️</span>
+                JIRA Config
+              </button>
             </div>
           )}
         </div>
@@ -883,9 +856,278 @@ function App() {
             </div>
           )}
 
+          {/* Stories Tab */}
           {activeTab === 'stories' && (
             <div>
-              {processedStories.map(story => (
+              {/* Filters and Controls */}
+              <div style={{
+                backgroundColor: '#1f2937',
+                border: '1px solid #374151',
+                borderRadius: '8px',
+                padding: '16px',
+                marginBottom: '24px'
+              }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
+                  {/* Search */}
+                  <div>
+                    <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', color: '#d1d5db', marginBottom: '8px' }}>
+                      🔍 Search Stories
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Search titles, descriptions..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      style={{
+                        width: '100%',
+                        padding: '8px 12px',
+                        backgroundColor: '#374151',
+                        border: '1px solid #4b5563',
+                        borderRadius: '6px',
+                        color: 'white',
+                        fontSize: '14px'
+                      }}
+                    />
+                  </div>
+
+                  {/* Filter */}
+                  <div>
+                    <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', color: '#d1d5db', marginBottom: '8px' }}>
+                      🎯 Filter
+                    </label>
+                    <select
+                      value={filterBy}
+                      onChange={(e) => setFilterBy(e.target.value)}
+                      style={{
+                        width: '100%',
+                        padding: '8px 12px',
+                        backgroundColor: '#374151',
+                        border: '1px solid #4b5563',
+                        borderRadius: '6px',
+                        color: 'white',
+                        fontSize: '14px'
+                      }}
+                    >
+                      <option value="all">All Stories ({processedStories.length})</option>
+                      <option value="recommended">🌟 Recommended ({processedStories.filter(s => s.confidence >= 0.8 && s.priority === 'High').length})</option>
+                      <option value="high-confidence">✅ High Confidence ({processedStories.filter(s => s.confidence >= 0.8).length})</option>
+                      <option value="recent">🕐 Recent (2 days)</option>
+                      <option value="needs-review">⚠️ Needs Review ({processedStories.filter(s => s.confidence < 0.7).length})</option>
+                    </select>
+                  </div>
+
+                  {/* Sort */}
+                  <div>
+                    <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', color: '#d1d5db', marginBottom: '8px' }}>
+                      📊 Sort By
+                    </label>
+                    <select
+                      value={sortBy}
+                      onChange={(e) => setSortBy(e.target.value)}
+                      style={{
+                        width: '100%',
+                        padding: '8px 12px',
+                        backgroundColor: '#374151',
+                        border: '1px solid #4b5563',
+                        borderRadius: '6px',
+                        color: 'white',
+                        fontSize: '14px'
+                      }}
+                    >
+                      <option value="date">📅 Most Recent</option>
+                      <option value="confidence">🎯 Highest Confidence</option>
+                      <option value="priority">⚡ Priority Level</option>
+                      <option value="effort">⚙️ Effort (Low to High)</option>
+                    </select>
+                  </div>
+
+                  {/* Quick Actions */}
+                  <div>
+                    <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', color: '#d1d5db', marginBottom: '8px' }}>
+                      🚀 Quick Actions
+                    </label>
+                    <button
+                      onClick={() => {
+                        const recommended = processedStories.filter(s => s.confidence >= 0.8 && s.priority === 'High' && !s.deployedToJira);
+                        if (recommended.length === 0) {
+                          alert('No recommended stories ready for deployment!');
+                          return;
+                        }
+                        if (window.confirm(`Deploy ${recommended.length} recommended stories to JIRA?`)) {
+                          recommended.forEach(story => deployToJira(story));
+                        }
+                      }}
+                      style={{
+                        width: '100%',
+                        padding: '8px 12px',
+                        background: 'linear-gradient(135deg, #8b5cf6, #3b82f6)',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '6px',
+                        fontSize: '14px',
+                        fontWeight: '500',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      🌟 Deploy Recommended
+                    </button>
+                  </div>
+                </div>
+
+                {/* Results Summary */}
+                <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid #374151' }}>
+                  <p style={{ fontSize: '14px', color: '#9ca3af', margin: 0 }}>
+                    Showing <span style={{ color: '#60a5fa', fontWeight: '500' }}>{filteredAndSortedStories.length}</span> of <span style={{ color: '#60a5fa', fontWeight: '500' }}>{processedStories.length}</span> stories
+                    {searchTerm && <span> matching "<span style={{ color: '#a855f7' }}>{searchTerm}</span>"</span>}
+                  </p>
+                </div>
+              </div>
+
+              {/* JIRA Configuration Modal */}
+              {showJiraConfig && (
+                <div style={{
+                  position: 'fixed',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  backgroundColor: 'rgba(0, 0, 0, 0.5)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  zIndex: 1000
+                }}>
+                  <div style={{
+                    backgroundColor: '#1f2937',
+                    borderRadius: '8px',
+                    padding: '24px',
+                    width: '90%',
+                    maxWidth: '400px',
+                    border: '1px solid #374151'
+                  }}>
+                    <h3 style={{ fontSize: '18px', fontWeight: 'bold', color: 'white', marginBottom: '16px' }}>
+                      🔧 JIRA Configuration
+                    </h3>
+                    
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                      <div>
+                        <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', color: '#d1d5db', marginBottom: '4px' }}>
+                          JIRA URL
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="https://yourcompany.atlassian.net"
+                          value={jiraConfig.url}
+                          onChange={(e) => setJiraConfig(prev => ({...prev, url: e.target.value}))}
+                          style={{
+                            width: '100%',
+                            padding: '8px 12px',
+                            backgroundColor: '#374151',
+                            border: '1px solid #4b5563',
+                            borderRadius: '6px',
+                            color: 'white'
+                          }}
+                        />
+                      </div>
+                      
+                      <div>
+                        <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', color: '#d1d5db', marginBottom: '4px' }}>
+                          Email
+                        </label>
+                        <input
+                          type="email"
+                          placeholder="your-email@company.com"
+                          value={jiraConfig.email}
+                          onChange={(e) => setJiraConfig(prev => ({...prev, email: e.target.value}))}
+                          style={{
+                            width: '100%',
+                            padding: '8px 12px',
+                            backgroundColor: '#374151',
+                            border: '1px solid #4b5563',
+                            borderRadius: '6px',
+                            color: 'white'
+                          }}
+                        />
+                      </div>
+                      
+                      <div>
+                        <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', color: '#d1d5db', marginBottom: '4px' }}>
+                          API Token
+                        </label>
+                        <input
+                          type="password"
+                          placeholder="Your JIRA API token"
+                          value={jiraConfig.token}
+                          onChange={(e) => setJiraConfig(prev => ({...prev, token: e.target.value}))}
+                          style={{
+                            width: '100%',
+                            padding: '8px 12px',
+                            backgroundColor: '#374151',
+                            border: '1px solid #4b5563',
+                            borderRadius: '6px',
+                            color: 'white'
+                          }}
+                        />
+                      </div>
+                      
+                      <div>
+                        <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', color: '#d1d5db', marginBottom: '4px' }}>
+                          Project Key
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="PROJ"
+                          value={jiraConfig.projectKey}
+                          onChange={(e) => setJiraConfig(prev => ({...prev, projectKey: e.target.value}))}
+                          style={{
+                            width: '100%',
+                            padding: '8px 12px',
+                            backgroundColor: '#374151',
+                            border: '1px solid #4b5563',
+                            borderRadius: '6px',
+                            color: 'white'
+                          }}
+                        />
+                      </div>
+                    </div>
+                    
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '24px' }}>
+                      <button
+                        onClick={() => setShowJiraConfig(false)}
+                        style={{
+                          padding: '8px 16px',
+                          backgroundColor: '#4b5563',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '6px',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={() => {
+                          setShowJiraConfig(false);
+                          alert('🤖 JIRA configuration saved! SkyNet ready for deployment.');
+                        }}
+                        style={{
+                          padding: '8px 16px',
+                          background: 'linear-gradient(135deg, #3b82f6, #1d4ed8)',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '6px',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        Save Config
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Stories List */}
+              {filteredAndSortedStories.map(story => (
                 <div key={story.id} style={styles.card}>
                   <div style={{ marginBottom: '16px' }}>
                     <h3 style={{ margin: '0 0 12px 0', fontSize: '18px', fontWeight: '600' }}>
@@ -1001,22 +1243,55 @@ function App() {
                     paddingTop: '16px', 
                     borderTop: '1px solid #374151' 
                   }}>
-                    <button style={{
-                      ...styles.button,
-                      background: 'linear-gradient(135deg, #374151, #4b5563)',
-                      color: '#d1d5db',
-                      border: '1px solid #6b7280'
-                    }}>
+                    <button
+                      onClick={() => alert('🔧 Story editing coming soon!')}
+                      style={{
+                        ...styles.button,
+                        background: 'linear-gradient(135deg, #374151, #4b5563)',
+                        color: '#d1d5db',
+                        border: '1px solid #6b7280'
+                      }}
+                    >
                       ✏️ Modify Parameters
                     </button>
-                    <button style={{
-                      ...styles.button,
-                      background: 'linear-gradient(135deg, #3b82f6, #1d4ed8)',
-                      color: 'white',
-                      boxShadow: '0 4px 15px rgba(59, 130, 246, 0.3)'
-                    }}>
-                      🚀 Deploy to JIRA
-                    </button>
+                    
+                    {story.deployedToJira ? (
+                      <span style={{
+                        ...styles.button,
+                        background: 'linear-gradient(135deg, #22c55e, #16a34a)',
+                        color: 'white',
+                        cursor: 'default'
+                      }}>
+                        ✅ Deployed: {story.deployedToJira}
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => deployToJira(story)}
+                        disabled={deployingToJira === story.id}
+                        style={{
+                          ...styles.button,
+                          background: deployingToJira === story.id 
+                            ? 'linear-gradient(45deg, #3b82f6, #8b5cf6, #3b82f6)'
+                            : 'linear-gradient(135deg, #3b82f6, #1d4ed8)',
+                          backgroundSize: deployingToJira === story.id ? '200% 200%' : '100% 100%',
+                          animation: deployingToJira === story.id ? 'skynetPulse 2s ease-in-out infinite' : 'none',
+                          color: 'white',
+                          boxShadow: deployingToJira === story.id ? '0 4px 25px rgba(59, 130, 246, 0.4)' : '0 4px 15px rgba(59, 130, 246, 0.3)',
+                          cursor: deployingToJira === story.id ? 'not-allowed' : 'pointer'
+                        }}
+                      >
+                        {deployingToJira === story.id ? (
+                          <>
+                            <span style={{ animation: 'rotate 1s linear infinite' }}>🤖</span>
+                            Deploying to JIRA...
+                          </>
+                        ) : (
+                          <>
+                            🚀 Deploy to JIRA
+                          </>
+                        )}
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}
