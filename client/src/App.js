@@ -24,6 +24,34 @@ function App() {
   const [showJiraConfig, setShowJiraConfig] = useState(false);
   const [deployingToJira, setDeployingToJira] = useState(null);
 
+  // Load JIRA config from localStorage on startup
+  useEffect(() => {
+    const savedConfig = localStorage.getItem('skynet-jira-config');
+    if (savedConfig) {
+      try {
+        const config = JSON.parse(savedConfig);
+        setJiraConfig(config);
+        console.log('✅ JIRA config loaded from storage');
+      } catch (e) {
+        console.log('❌ Failed to load JIRA config from storage');
+      }
+    }
+  }, []);
+
+  // Save JIRA config to localStorage whenever it changes
+  const saveJiraConfig = (newConfig) => {
+    setJiraConfig(newConfig);
+    localStorage.setItem('skynet-jira-config', JSON.stringify(newConfig));
+    console.log('💾 JIRA config saved to storage');
+  };
+
+  // Clear JIRA config
+  const clearJiraConfig = () => {
+    setJiraConfig({ url: '', email: '', token: '', projectKey: '' });
+    localStorage.removeItem('skynet-jira-config');
+    console.log('🗑️ JIRA config cleared');
+  };
+
   const loadTranscripts = async () => {
     setLoading(true);
     setError('');
@@ -608,14 +636,46 @@ function App() {
                 style={{
                   ...styles.button,
                   width: '100%',
-                  background: 'linear-gradient(135deg, #3b82f6, #1d4ed8)',
+                  background: jiraConfig.url && jiraConfig.email && jiraConfig.token && jiraConfig.projectKey
+                    ? 'linear-gradient(135deg, #22c55e, #16a34a)'
+                    : 'linear-gradient(135deg, #3b82f6, #1d4ed8)',
                   color: 'white',
                   justifyContent: 'center'
                 }}
               >
                 <span>⚙️</span>
-                JIRA Config
+                {jiraConfig.url ? '✅ JIRA Connected' : 'JIRA Setup'}
               </button>
+              
+              {jiraConfig.url && (
+                <div style={{
+                  marginTop: '8px',
+                  padding: '8px',
+                  backgroundColor: '#374151',
+                  borderRadius: '6px',
+                  fontSize: '12px',
+                  color: '#9ca3af'
+                }}>
+                  <div>🌐 {jiraConfig.url.replace('https://', '').replace('http://', '')}</div>
+                  <div>📧 {jiraConfig.email}</div>
+                  <div>📋 {jiraConfig.projectKey}</div>
+                  <button
+                    onClick={clearJiraConfig}
+                    style={{
+                      marginTop: '4px',
+                      padding: '2px 6px',
+                      backgroundColor: '#ef4444',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '4px',
+                      fontSize: '10px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    🗑️ Clear
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -1091,7 +1151,7 @@ function App() {
                       </div>
                     </div>
                     
-                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '24px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', marginTop: '24px' }}>
                       <button
                         onClick={() => setShowJiraConfig(false)}
                         style={{
@@ -1105,21 +1165,39 @@ function App() {
                       >
                         Cancel
                       </button>
+                      
                       <button
-                        onClick={() => {
-                          setShowJiraConfig(false);
-                          alert('🤖 JIRA configuration saved! SkyNet ready for deployment.');
-                        }}
+                        onClick={clearJiraConfig}
                         style={{
                           padding: '8px 16px',
-                          background: 'linear-gradient(135deg, #3b82f6, #1d4ed8)',
+                          backgroundColor: '#ef4444',
                           color: 'white',
                           border: 'none',
                           borderRadius: '6px',
                           cursor: 'pointer'
                         }}
                       >
-                        Save Config
+                        🗑️ Clear All
+                      </button>
+                      
+                      <button
+                        onClick={() => {
+                          saveJiraConfig(jiraConfig);
+                          setShowJiraConfig(false);
+                          alert('🤖 JIRA configuration saved! SkyNet ready for deployment.');
+                        }}
+                        disabled={!jiraConfig.url || !jiraConfig.email || !jiraConfig.token || !jiraConfig.projectKey}
+                        style={{
+                          padding: '8px 16px',
+                          background: 'linear-gradient(135deg, #3b82f6, #1d4ed8)',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                          opacity: (!jiraConfig.url || !jiraConfig.email || !jiraConfig.token || !jiraConfig.projectKey) ? 0.5 : 1
+                        }}
+                      >
+                        💾 Save Config
                       </button>
                     </div>
                   </div>
