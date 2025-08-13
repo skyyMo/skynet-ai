@@ -274,182 +274,65 @@ Each story should be actionable and specific. If multiple related items are disc
 
 // Deploy story to JIRA - Improved version with better error handling
 // Deploy story to JIRA - Fixed with proper Atlassian Document Format
+// Deploy story to JIRA - Debugging version
 app.post('/api/deploy-to-jira', async (req, res) => {
   try {
     const { story, jiraConfig } = req.body;
     
-    // Validate config
-    if (!jiraConfig.url || !jiraConfig.email || !jiraConfig.token || !jiraConfig.projectKey) {
-      return res.status(400).json({ 
-        error: 'JIRA configuration incomplete. Please check all fields are filled.' 
-      });
+    console.log(`🤖 SkyNet attempting JIRA deployment...`);
+    console.log(`URL: ${jiraConfig.url}`);
+    console.log(`Email: ${jiraConfig.email}`);
+    console.log(`Project: ${jiraConfig.projectKey}`);
+    console.log(`Token length: ${jiraConfig.token?.length} characters`);
+
+    // Clean URL
+    const cleanUrl = jiraConfig.url.replace(/\/$/, '');
+    
+    // First, test basic authentication with a simple API call
+    console.log(`Testing JIRA connection to: ${cleanUrl}/rest/api/3/myself`);
+    
+    const auth = Buffer.from(`${jiraConfig.email}:${jiraConfig.token}`).toString('base64');
+    
+    const testResponse = await fetch(`${cleanUrl}/rest/api/3/myself`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Basic ${auth}`,
+        'Accept': 'application/json'
+      }
+    });
+
+    const testResponseText = await testResponse.text();
+    console.log(`Test response status: ${testResponse.status}`);
+    console.log(`Test response body: ${testResponseText.substring(0, 200)}...`);
+
+    if (!testResponse.ok) {
+      // If auth test fails, return specific error
+      if (testResponse.status === 401) {
+        throw new Error('JIRA Authentication failed. Please check your email and API token.');
+      } else if (testResponse.status === 404) {
+        throw new Error('JIRA URL not found. Please check your JIRA URL format (should be https://yourcompany.atlassian.net)');
+      } else {
+        throw new Error(`JIRA connection test failed (${testResponse.status}): ${testResponseText.substring(0, 100)}`);
+      }
     }
 
-    console.log(`SkyNet deploying story to JIRA: ${story.title}`);
+    console.log('✅ JIRA authentication successful, proceeding with ticket creation...');
 
-    // Clean URL - remove trailing slash if present
-    const cleanUrl = jiraConfig.url.replace(/\/$/, '');
-
-    // Create description using Atlassian Document Format
-    const description = {
-      type: "doc",
-      version: 1,
-      content: [
-        {
-          type: "paragraph",
-          content: [
-            {
-              type: "text",
-              text: story.description
-            }
-          ]
-        },
-        {
-          type: "heading",
-          attrs: { level: 3 },
-          content: [
-            {
-              type: "text",
-              text: "🎯 Business Value"
-            }
-          ]
-        },
-        {
-          type: "paragraph",
-          content: [
-            {
-              type: "text",
-              text: story.businessValue
-            }
-          ]
-        },
-        {
-          type: "heading",
-          attrs: { level: 3 },
-          content: [
-            {
-              type: "text",
-              text: "✅ Acceptance Criteria"
-            }
-          ]
-        },
-        {
-          type: "bulletList",
-          content: story.acceptanceCriteria.map(criteria => ({
-            type: "listItem",
-            content: [
-              {
-                type: "paragraph",
-                content: [
-                  {
-                    type: "text",
-                    text: criteria
-                  }
-                ]
-              }
-            ]
-          }))
-        },
-        {
-          type: "heading",
-          attrs: { level: 3 },
-          content: [
-            {
-              type: "text",
-              text: "⚙️ Technical Requirements"
-            }
-          ]
-        },
-        {
-          type: "bulletList",
-          content: story.technicalRequirements.map(req => ({
-            type: "listItem",
-            content: [
-              {
-                type: "paragraph",
-                content: [
-                  {
-                    type: "text",
-                    text: req
-                  }
-                ]
-              }
-            ]
-          }))
-        },
-        {
-          type: "heading",
-          attrs: { level: 3 },
-          content: [
-            {
-              type: "text",
-              text: "⚠️ Identified Risks"
-            }
-          ]
-        },
-        {
-          type: "bulletList",
-          content: story.risks.map(risk => ({
-            type: "listItem",
-            content: [
-              {
-                type: "paragraph",
-                content: [
-                  {
-                    type: "text",
-                    text: risk
-                  }
-                ]
-              }
-            ]
-          }))
-        },
-        {
-          type: "rule"
-        },
-        {
-          type: "paragraph",
-          content: [
-            {
-              type: "text",
-              text: `🤖 Generated by SkyNet AI from meeting: ${story.sourceTranscript}`
-            }
-          ]
-        },
-        {
-          type: "paragraph",
-          content: [
-            {
-              type: "text",
-              text: `AI Confidence: ${Math.round(story.confidence * 100)}% | Generated: ${story.sourceTimestamp}`
-            }
-          ]
-        }
-      ]
-    };
-
-    // Create JIRA ticket with proper document format
+    // Simple ticket format to avoid document format issues
     const jiraTicket = {
       fields: {
         project: {
           key: jiraConfig.projectKey
         },
         summary: story.title,
-        description: description,
+        description: `${story.description}\n\nBusiness Value:\n${story.businessValue}\n\nGenerated by SkyNet AI from: ${story.sourceTranscript}\nConfidence: ${Math.round(story.confidence * 100)}%`,
         issuetype: {
           name: 'Story'
         }
       }
     };
 
-    // Add priority if valid
-    if (story.priority && ['Highest', 'High', 'Medium', 'Low', 'Lowest'].includes(story.priority)) {
-      jiraTicket.fields.priority = { name: story.priority };
-    }
-
-    console.log('Creating JIRA ticket with Atlassian Document Format');
-
-    const auth = Buffer.from(`${jiraConfig.email}:${jiraConfig.token}`).toString('base64');
+    console.log('Creating JIRA ticket with simplified format...');
     
     const response = await fetch(`${cleanUrl}/rest/api/3/issue`, {
       method: 'POST',
@@ -462,39 +345,34 @@ app.post('/api/deploy-to-jira', async (req, res) => {
     });
 
     const responseText = await response.text();
-    console.log('JIRA API Response Status:', response.status);
+    console.log(`Ticket creation response status: ${response.status}`);
+    console.log(`Ticket creation response body: ${responseText.substring(0, 300)}...`);
 
     if (!response.ok) {
-      let errorData;
-      try {
-        errorData = JSON.parse(responseText);
-      } catch (e) {
-        throw new Error(`JIRA API error (${response.status}): ${responseText.substring(0, 200)}`);
-      }
-
-      // Extract error messages
-      const errorMessages = [];
-      if (errorData.errorMessages) errorMessages.push(...errorData.errorMessages);
-      if (errorData.errors) {
-        Object.entries(errorData.errors).forEach(([field, error]) => {
-          errorMessages.push(`${field}: ${error}`);
-        });
-      }
-
-      // Handle specific errors
-      if (response.status === 401) {
-        throw new Error('Authentication failed. Check your email and API token.');
-      } else if (response.status === 403) {
-        throw new Error('Permission denied. Check that you have "Create Issues" permission.');
-      } else if (response.status === 404) {
-        throw new Error(`Project "${jiraConfig.projectKey}" not found. Check your project key.`);
+      let errorMsg = `JIRA ticket creation failed (${response.status})`;
+      
+      if (responseText.includes('<!DOCTYPE')) {
+        errorMsg += ': Received HTML instead of JSON. This usually means wrong URL or authentication redirect.';
+      } else {
+        try {
+          const errorData = JSON.parse(responseText);
+          if (errorData.errorMessages) {
+            errorMsg += `: ${errorData.errorMessages.join(', ')}`;
+          }
+          if (errorData.errors) {
+            const fieldErrors = Object.entries(errorData.errors).map(([field, error]) => `${field}: ${error}`);
+            errorMsg += `: ${fieldErrors.join(', ')}`;
+          }
+        } catch (e) {
+          errorMsg += `: ${responseText.substring(0, 100)}`;
+        }
       }
       
-      throw new Error(`JIRA API error: ${errorMessages.join('; ')}`);
+      throw new Error(errorMsg);
     }
 
     const result = JSON.parse(responseText);
-    console.log(`SkyNet successfully deployed ticket: ${result.key}`);
+    console.log(`🚀 SkyNet successfully deployed ticket: ${result.key}`);
     
     res.json({
       success: true,
@@ -504,9 +382,9 @@ app.post('/api/deploy-to-jira', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('JIRA deployment error:', error);
+    console.error('🚨 JIRA deployment error:', error.message);
     res.status(500).json({ 
-      error: error.message || 'Failed to deploy to JIRA'
+      error: error.message
     });
   }
 });
