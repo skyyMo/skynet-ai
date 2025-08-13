@@ -8,6 +8,21 @@ function App() {
   const [activeTab, setActiveTab] = useState('transcripts');
   const [error, setError] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  
+  // New state for sorting and filtering
+  const [sortBy, setSortBy] = useState('date'); // date, confidence, priority
+  const [filterBy, setFilterBy] = useState('all'); // all, recommended, high-confidence, recent
+  const [searchTerm, setSearchTerm] = useState('');
+  
+  // JIRA state
+  const [jiraConfig, setJiraConfig] = useState({
+    url: '',
+    email: '',
+    token: '',
+    projectKey: ''
+  });
+  const [showJiraConfig, setShowJiraConfig] = useState(false);
+  const [deployingToJira, setDeployingToJira] = useState(null);
 
   const loadTranscripts = async () => {
     setLoading(true);
@@ -152,6 +167,101 @@ function App() {
       hour: '2-digit',
       minute: '2-digit'
     });
+  };
+
+  const deployToJira = async (story) => {
+    if (!jiraConfig.url || !jiraConfig.email || !jiraConfig.token || !jiraConfig.projectKey) {
+      alert('🔧 Please configure JIRA settings first!');
+      setShowJiraConfig(true);
+      return;
+    }
+
+    setDeployingToJira(story.id);
+    
+    try {
+      const response = await fetch('/api/deploy-to-jira', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          story,
+          jiraConfig
+        })
+      });
+      
+      const result = await response.json();
+      
+      if (response.ok) {
+        alert(`🚀 SkyNet deployed story to JIRA!\n\nTicket: ${result.key}\nURL: ${result.url}`);
+        // Mark story as deployed
+        setProcessedStories(prev => prev.map(s => 
+          s.id === story.id ? {...s, deployedToJira: result.key} : s
+        ));
+      } else {
+        alert('❌ JIRA deployment failed: ' + result.error);
+      }
+    } catch (err) {
+      alert('❌ JIRA deployment error: ' + err.message);
+    }
+    
+    setDeployingToJira(null);
+  };
+
+  // Sorting and filtering logic
+  const getSortedAndFilteredStories = () => {
+    let stories = [...processedStories];
+
+    // Apply search filter
+    if (searchTerm) {
+      stories = stories.filter(story => 
+        story.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        story.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        story.sourceTranscript.toLowerCase().includes(searchTerm.toLowerCase())
+      );
+    }
+
+    // Apply category filter
+    switch (filterBy) {
+      case 'recommended':
+        stories = stories.filter(s => s.confidence >= 0.8 && s.priority === 'High');
+        break;
+      case 'high-confidence':
+        stories = stories.filter(s => s.confidence >= 0.8);
+        break;
+      case 'recent':
+        const twoDaysAgo = new Date();
+        twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+        stories = stories.filter(s => new Date(s.sourceTimestamp) >= twoDaysAgo);
+        break;
+      case 'needs-review':
+        stories = stories.filter(s => s.confidence < 0.7);
+        break;
+      default:
+        break;
+    }
+
+    // Apply sorting
+    switch (sortBy) {
+      case 'confidence':
+        stories.sort((a, b) => b.confidence - a.confidence);
+        break;
+      case 'priority':
+        const priorityOrder = { 'High': 3, 'Medium': 2, 'Low': 1 };
+        stories.sort((a, b) => (priorityOrder[b.priority] || 0) - (priorityOrder[a.priority] || 0));
+        break;
+      case 'effort':
+        stories.sort((a, b) => {
+          const aEffort = parseInt(a.effort) || 0;
+          const bEffort = parseInt(b.effort) || 0;
+          return aEffort - bEffort;
+        });
+        break;
+      case 'date':
+      default:
+        stories.sort((a, b) => new Date(b.sourceTimestamp) - new Date(a.sourceTimestamp));
+        break;
+    }
+
+    return stories;
   };
 
   const getConfidenceColor = (confidence) => {
@@ -850,6 +960,37 @@ function App() {
                   </div>
                 </div>
               ))}
+
+              {filteredAndSortedStories.length === 0 && processedStories.length > 0 && (
+                <div style={{ textAlign: 'center', padding: '64px' }}>
+                  <div style={{ fontSize: '64px', marginBottom: '16px' }}>🔍</div>
+                  <h3 style={{ 
+                    fontSize: '18px', 
+                    fontWeight: '500', 
+                    color: '#9ca3af', 
+                    marginBottom: '8px'
+                  }}>
+                    No Stories Match Your Filters
+                  </h3>
+                  <p style={{ color: '#6b7280', marginBottom: '16px' }}>
+                    Try adjusting your search or filter criteria.
+                  </p>
+                  <button
+                    onClick={() => {
+                      setSearchTerm('');
+                      setFilterBy('all');
+                      setSortBy('date');
+                    }}
+                    style={{
+                      ...styles.button,
+                      background: 'linear-gradient(135deg, #3b82f6, #1d4ed8)',
+                      color: 'white'
+                    }}
+                  >
+                    🔄 Clear All Filters
+                  </button>
+                </div>
+              )}
 
               {processedStories.length === 0 && (
                 <div style={{ textAlign: 'center', padding: '64px' }}>

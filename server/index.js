@@ -17,13 +17,13 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 // Initialize Notion
-const notion = new Client({ 
-  auth: process.env.NOTION_TOKEN 
+const notion = new Client({
+  auth: process.env.NOTION_TOKEN
 });
 
 // Test route
 app.get('/api/health', (req, res) => {
-  res.json({ 
+  res.json({
     status: 'SkyNet AI is online and operational! 🤖',
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'development'
@@ -34,16 +34,16 @@ app.get('/api/health', (req, res) => {
 app.get('/api/transcripts', async (req, res) => {
   try {
     console.log('SkyNet fetching transcripts...');
-    
+
     if (!process.env.NOTION_TOKEN) {
-      return res.status(400).json({ 
-        error: 'NOTION_TOKEN not found in environment variables' 
+      return res.status(400).json({
+        error: 'NOTION_TOKEN not found in environment variables'
       });
     }
 
     if (!process.env.NOTION_DATABASE_ID) {
-      return res.status(400).json({ 
-        error: 'NOTION_DATABASE_ID not found in environment variables' 
+      return res.status(400).json({
+        error: 'NOTION_DATABASE_ID not found in environment variables'
       });
     }
 
@@ -57,21 +57,21 @@ app.get('/api/transcripts', async (req, res) => {
       ],
       page_size: 20 // Limit to recent 20 for performance
     });
-    
+
     console.log(`Found ${response.results.length} pages`);
-    
+
     // Get basic info AND page content
     const transcriptPromises = response.results.map(async (page) => {
       const properties = page.properties;
-      
+
       try {
         // Fetch the actual page content
         console.log(`Fetching content for: ${properties.Name?.title?.[0]?.plain_text}`);
-        
+
         const pageContent = await notion.blocks.children.list({
           block_id: page.id,
         });
-        
+
         // Extract text from all blocks
         let content = '';
         pageContent.results.forEach(block => {
@@ -98,7 +98,7 @@ app.get('/api/transcripts', async (req, res) => {
               .join('') + '\n';
           }
         });
-        
+
         return {
           id: page.id,
           title: properties.Name?.title?.[0]?.plain_text || 'Untitled Meeting',
@@ -122,20 +122,20 @@ app.get('/api/transcripts', async (req, res) => {
         };
       }
     });
-    
+
     const transcripts = await Promise.all(transcriptPromises);
-    
+
     // Filter out transcripts with no content (less than 50 words)
     const validTranscripts = transcripts.filter(t => t.wordCount > 50);
-    
+
     console.log(`Returning ${validTranscripts.length} transcripts with content`);
-    
+
     res.json(validTranscripts);
   } catch (error) {
     console.error('Notion API Error:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       error: 'Failed to fetch transcripts',
-      details: error.message 
+      details: error.message
     });
   }
 });
@@ -144,16 +144,16 @@ app.get('/api/transcripts', async (req, res) => {
 app.post('/api/process-transcript', async (req, res) => {
   try {
     const { transcript, title } = req.body;
-    
+
     if (!process.env.OPENAI_API_KEY) {
-      return res.status(400).json({ 
-        error: 'OpenAI API key not configured. Add OPENAI_API_KEY to your environment variables' 
+      return res.status(400).json({
+        error: 'OpenAI API key not configured. Add OPENAI_API_KEY to your environment variables'
       });
     }
 
     if (!transcript || transcript.length < 100) {
-      return res.status(400).json({ 
-        error: 'Transcript too short or missing' 
+      return res.status(400).json({
+        error: 'Transcript too short or missing'
       });
     }
 
@@ -162,8 +162,8 @@ app.post('/api/process-transcript', async (req, res) => {
 
     // Initialize OpenAI
     const OpenAI = require('openai');
-    const openai = new OpenAI({ 
-      apiKey: process.env.OPENAI_API_KEY 
+    const openai = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY
     });
 
     const systemPrompt = `You are SkyNet AI, an autonomous system for extracting development stories from meeting transcripts.
@@ -217,28 +217,28 @@ Each story should be actionable and specific. If multiple related items are disc
       temperature: 0.2,
       max_tokens: 3000
     });
-    
+
     const rawResponse = completion.choices[0].message.content;
     console.log('Raw OpenAI response:');
     console.log(rawResponse);
-    
+
     let result;
     try {
       // Clean the response - remove markdown code blocks
       let cleanResponse = rawResponse.trim();
-      
+
       // Remove ```json and ``` if present
       if (cleanResponse.startsWith('```json')) {
         cleanResponse = cleanResponse.replace(/^```json\s*/, '').replace(/\s*```$/, '');
       } else if (cleanResponse.startsWith('```')) {
         cleanResponse = cleanResponse.replace(/^```\s*/, '').replace(/\s*```$/, '');
       }
-      
+
       console.log('Cleaned response:');
       console.log(cleanResponse);
-      
+
       result = JSON.parse(cleanResponse);
-      
+
       // Add metadata to each story
       if (result.stories && Array.isArray(result.stories)) {
         result.stories = result.stories.map((story, index) => ({
@@ -247,27 +247,190 @@ Each story should be actionable and specific. If multiple related items are disc
           sourceTranscript: title,
           sourceTimestamp: new Date().toISOString().split('T')[0]
         }));
-        
+
         console.log(`SkyNet generated ${result.stories.length} stories from transcript`);
       } else {
         throw new Error('Invalid response format - expected stories array');
       }
-      
+
     } catch (parseError) {
       console.error('Failed to parse OpenAI response:', parseError);
       console.error('Raw response was:', rawResponse);
-      return res.status(500).json({ 
+      return res.status(500).json({
         error: 'SkyNet AI returned invalid format. Check server logs for details.',
         details: rawResponse.substring(0, 200) + '...'
       });
     }
-    
+
     res.json(result);
   } catch (error) {
     console.error('OpenAI API Error:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       error: 'SkyNet AI processing failed: ' + error.message,
-      details: error.response?.data || error.message 
+      details: error.response?.data || error.message
+    });
+  }
+});
+
+// Deploy story to JIRA
+app.post('/api/deploy-to-jira', async (req, res) => {
+  try {
+    const { story, jiraConfig } = req.body;
+
+    if (!jiraConfig.url || !jiraConfig.email || !jiraConfig.token || !jiraConfig.projectKey) {
+      return res.status(400).json({
+        error: 'JIRA configuration incomplete'
+      });
+    }
+
+    console.log(`SkyNet deploying story to JIRA: ${story.title}`);
+
+    // Prepare JIRA ticket data
+    const jiraTicket = {
+      fields: {
+        project: {
+          key: jiraConfig.projectKey
+        },
+        summary: story.title,
+        description: {
+          type: "doc",
+          version: 1,
+          content: [
+            {
+              type: "paragraph",
+              content: [
+                {
+                  type: "text",
+                  text: story.description
+                }
+              ]
+            },
+            {
+              type: "heading",
+              attrs: { level: 3 },
+              content: [
+                {
+                  type: "text",
+                  text: "🎯 Business Value"
+                }
+              ]
+            },
+            {
+              type: "paragraph",
+              content: [
+                {
+                  type: "text",
+                  text: story.businessValue
+                }
+              ]
+            },
+            {
+              type: "heading",
+              attrs: { level: 3 },
+              content: [
+                {
+                  type: "text",
+                  text: "✅ Acceptance Criteria"
+                }
+              ]
+            },
+            {
+              type: "bulletList",
+              content: story.acceptanceCriteria.map(criteria => ({
+                type: "listItem",
+                content: [
+                  {
+                    type: "paragraph",
+                    content: [
+                      {
+                        type: "text",
+                        text: criteria
+                      }
+                    ]
+                  }
+                ]
+              }))
+            },
+            {
+              type: "heading",
+              attrs: { level: 3 },
+              content: [
+                {
+                  type: "text",
+                  text: "⚙️ Technical Requirements"
+                }
+              ]
+            },
+            {
+              type: "bulletList",
+              content: story.technicalRequirements.map(req => ({
+                type: "listItem",
+                content: [
+                  {
+                    type: "paragraph",
+                    content: [
+                      {
+                        type: "text",
+                        text: req
+                      }
+                    ]
+                  }
+                ]
+              }))
+            },
+            {
+              type: "paragraph",
+              content: [
+                {
+                  type: "text",
+                  text: `\n🤖 Generated by SkyNet AI from: ${story.sourceTranscript}\nConfidence: ${Math.round(story.confidence * 100)}%`
+                }
+              ]
+            }
+          ]
+        },
+        issuetype: {
+          name: story.type === 'Feature' ? 'Story' : 'Task'
+        },
+        priority: {
+          name: story.priority
+        }
+      }
+    };
+
+    // Create JIRA ticket
+    const auth = Buffer.from(`${jiraConfig.email}:${jiraConfig.token}`).toString('base64');
+
+    const response = await fetch(`${jiraConfig.url}/rest/api/3/issue`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Basic ${auth}`,
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(jiraTicket)
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(`JIRA API error: ${errorData.errorMessages?.join(', ') || response.statusText}`);
+    }
+
+    const result = await response.json();
+
+    console.log(`SkyNet successfully deployed ticket: ${result.key}`);
+
+    res.json({
+      success: true,
+      key: result.key,
+      url: `${jiraConfig.url}/browse/${result.key}`,
+      id: result.id
+    });
+
+  } catch (error) {
+    console.error('JIRA deployment error:', error);
+    res.status(500).json({
+      error: 'Failed to deploy to JIRA: ' + error.message
     });
   }
 });
