@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+export default App;import React, { useState, useEffect } from 'react';
 
 function App() {
   const [transcripts, setTranscripts] = useState([]);
