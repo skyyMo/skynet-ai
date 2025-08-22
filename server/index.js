@@ -12,11 +12,6 @@ const port = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json());
 
-// Serve static files from React build in production
-if (process.env.NODE_ENV === 'production') {
-  app.use(express.static(path.join(__dirname, 'build')));
-}
-
 // Initialize Notion
 const notion = new Client({ 
   auth: process.env.NOTION_TOKEN 
@@ -328,7 +323,10 @@ function simpleTextToADF(text) {
   };
 }
 
-// API ROUTES
+// ============================================
+// API ROUTES - MUST BE DEFINED BEFORE STATIC FILES
+// ============================================
+
 // Test route
 app.get('/api/health', (req, res) => {
   res.json({ 
@@ -732,8 +730,15 @@ app.post('/api/auto-process-all', async (req, res) => {
   }
 });
 
-// Catch all handler for React Router in production
+// ============================================
+// STATIC FILES AND CATCH-ALL - MUST BE LAST
+// ============================================
+
+// Serve static files from React build in production
 if (process.env.NODE_ENV === 'production') {
+  app.use(express.static(path.join(__dirname, 'build')));
+  
+  // Catch all handler for React Router - MUST BE THE VERY LAST ROUTE
   app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, 'build', 'index.html'));
   });
