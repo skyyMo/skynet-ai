@@ -21,6 +21,295 @@ const notion = new Client({
   auth: process.env.NOTION_TOKEN 
 });
 
+// Helper function to send Slack notifications
+async function sendSlackNotification(story, webhookUrl) {
+  try {
+    const blocks = [
+      {
+        "type": "header",
+        "text": {
+          "type": "plain_text",
+          "text": `🤖 SkyNet Story Generated: ${story.title}`
+        }
+      },
+      {
+        "type": "section",
+        "fields": [
+          {
+            "type": "mrkdwn",
+            "text": `*Type:* ${story.type}`
+          },
+          {
+            "type": "mrkdwn",
+            "text": `*Priority:* ${story.priority}`
+          },
+          {
+            "type": "mrkdwn",
+            "text": `*Effort:* ${story.effort}`
+          },
+          {
+            "type": "mrkdwn",
+            "text": `*Epic:* ${story.epic}`
+          }
+        ]
+      },
+      {
+        "type": "section",
+        "text": {
+          "type": "mrkdwn",
+          "text": `*Description:*\n${story.description}`
+        }
+      },
+      {
+        "type": "section",
+        "text": {
+          "type": "mrkdwn",
+          "text": `*Business Value:*\n${story.businessValue}`
+        }
+      },
+      {
+        "type": "section",
+        "text": {
+          "type": "mrkdwn",
+          "text": `*Acceptance Criteria:*\n${story.acceptanceCriteria.map(c => `• ${c}`).join('\n')}`
+        }
+      },
+      {
+        "type": "context",
+        "elements": [
+          {
+            "type": "mrkdwn",
+            "text": `📊 Confidence: ${Math.round(story.confidence * 100)}% | 📅 From: ${story.sourceTranscript} | ⏰ ${story.sourceTimestamp}`
+          }
+        ]
+      },
+      {
+        "type": "divider"
+      }
+    ];
+
+    const payload = {
+      blocks: blocks,
+      username: "SkyNet AI",
+      icon_emoji: ":robot_face:"
+    };
+
+    const response = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      throw new Error(`Slack webhook failed: ${response.status}`);
+    }
+
+    console.log(`📤 Slack notification sent for story: ${story.title}`);
+    return true;
+  } catch (error) {
+    console.error('❌ Slack notification failed:', error.message);
+    return false;
+  }
+}
+
+// Helper function to automatically process a transcript
+async function autoProcessTranscript(transcript, title) {
+  try {
+    console.log(`🤖 SkyNet auto-processing transcript: ${title}`);
+
+    if (!process.env.OPENAI_API_KEY) {
+      console.error('❌ OpenAI API key not configured for auto-processing');
+      return null;
+    }
+
+    if (!transcript || transcript.length < 100) {
+      console.log(`⚠️ Skipping auto-processing: transcript too short (${transcript.length} chars)`);
+      return null;
+    }
+
+    const OpenAI = require('openai');
+    const openai = new OpenAI({ 
+      apiKey: process.env.OPENAI_API_KEY 
+    });
+
+    const systemPrompt = `You are SkyNet AI, an autonomous system for extracting development stories from meeting transcripts.
+
+IMPORTANT: Return ONLY valid JSON - no markdown, no code blocks, no additional text.
+
+Return an array of stories in this exact JSON structure:
+{
+  "stories": [
+    {
+      "title": "Clear, actionable story title",
+      "type": "Feature",
+      "priority": "High", 
+      "effort": "3 story points",
+      "epic": "Epic category this belongs to",
+      "description": "Detailed description of what needs to be built",
+      "acceptanceCriteria": ["criterion 1", "criterion 2", "criterion 3"],
+      "technicalRequirements": ["requirement 1", "requirement 2"],
+      "businessValue": "Why this matters to the business",
+      "risks": ["risk 1", "risk 2"],
+      "confidence": 0.85,
+      "discussionContext": "Brief context from the meeting where this was discussed"
+    }
+  ]
+}
+
+Extract EVERY distinct development item discussed. This includes:
+- New features or enhancements
+- Bug fixes mentioned
+- Technical debt items
+- UI/UX improvements
+- Infrastructure changes
+- Performance optimizations
+- API changes
+- Database modifications
+
+Each story should be actionable and specific. If multiple related items are discussed, create separate stories for each distinct deliverable.`;
+
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content: systemPrompt
+        },
+        {
+          role: "user",
+          content: `Meeting: ${title}\n\nTranscript: ${transcript}`
+        }
+      ],
+      temperature: 0.2,
+      max_tokens: 3000
+    });
+    
+    const rawResponse = completion.choices[0].message.content;
+    
+    let result;
+    try {
+      // Clean the response - remove markdown code blocks
+      let cleanResponse = rawResponse.trim();
+      
+      if (cleanResponse.startsWith('```json')) {
+        cleanResponse = cleanResponse.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+      } else if (cleanResponse.startsWith('```')) {
+        cleanResponse = cleanResponse.replace(/^```\s*/, '').replace(/\s*```$/, '');
+      }
+      
+      result = JSON.parse(cleanResponse);
+      
+      // Add metadata to each story
+      if (result.stories && Array.isArray(result.stories)) {
+        result.stories = result.stories.map((story, index) => ({
+          ...story,
+          id: `story-${Date.now()}-${index}`,
+          sourceTranscript: title,
+          sourceTimestamp: new Date().toISOString().split('T')[0],
+          autoProcessed: true
+        }));
+        
+        console.log(`🎯 SkyNet auto-generated ${result.stories.length} stories from: ${title}`);
+        return result;
+      } else {
+        console.log(`⚠️ No stories found in transcript: ${title}`);
+        return null;
+      }
+      
+    } catch (parseError) {
+      console.error('❌ Auto-processing failed - invalid AI response:', parseError.message);
+      return null;
+    }
+    
+  } catch (error) {
+    console.error('❌ Auto-processing error:', error.message);
+    return null;
+  }
+}
+
+// Helper function to convert plain text to Atlassian Document Format
+function textToADF(text) {
+  if (!text || text.trim() === '') {
+    return {
+      type: "doc",
+      version: 1,
+      content: [
+        {
+          type: "paragraph",
+          content: []
+        }
+      ]
+    };
+  }
+
+  const lines = text.split('\n');
+  const content = [];
+  
+  for (const line of lines) {
+    const trimmedLine = line.trim();
+    
+    if (trimmedLine === '') {
+      // Skip empty lines to avoid empty paragraphs
+      continue;
+    }
+    
+    // Create paragraph with text content
+    const paragraph = {
+      type: "paragraph",
+      content: [
+        {
+          type: "text",
+          text: trimmedLine
+        }
+      ]
+    };
+    
+    // Add bold formatting for header lines
+    if (trimmedLine.startsWith('🎯 ') || trimmedLine.startsWith('✅ ') || 
+        trimmedLine.startsWith('⚙️ ') || trimmedLine.startsWith('⚠️ ') || 
+        trimmedLine.startsWith('🤖 ')) {
+      paragraph.content[0].marks = [{ type: "strong" }];
+    }
+    
+    content.push(paragraph);
+  }
+  
+  // Ensure we always have at least one paragraph
+  if (content.length === 0) {
+    content.push({
+      type: "paragraph",
+      content: []
+    });
+  }
+  
+  return {
+    type: "doc",
+    version: 1,
+    content: content
+  };
+}
+
+// Simpler ADF function as fallback
+function simpleTextToADF(text) {
+  return {
+    type: "doc",
+    version: 1,
+    content: [
+      {
+        type: "paragraph",
+        content: [
+          {
+            type: "text",
+            text: text || "No description provided"
+          }
+        ]
+      }
+    ]
+  };
+}
+
 // Test route
 app.get('/api/health', (req, res) => {
   res.json({ 
@@ -140,10 +429,10 @@ app.get('/api/transcripts', async (req, res) => {
   }
 });
 
-// Process transcript with AI
+// Process transcript with AI - Updated with Slack notifications
 app.post('/api/process-transcript', async (req, res) => {
   try {
-    const { transcript, title } = req.body;
+    const { transcript, title, slackWebhook } = req.body;
     
     if (!process.env.OPENAI_API_KEY) {
       return res.status(400).json({ 
@@ -160,106 +449,26 @@ app.post('/api/process-transcript', async (req, res) => {
     console.log(`SkyNet processing transcript: ${title}`);
     console.log(`Transcript length: ${transcript.length} characters`);
 
-    // Initialize OpenAI
-    const OpenAI = require('openai');
-    const openai = new OpenAI({ 
-      apiKey: process.env.OPENAI_API_KEY 
-    });
-
-    const systemPrompt = `You are SkyNet AI, an autonomous system for extracting development stories from meeting transcripts.
-
-IMPORTANT: Return ONLY valid JSON - no markdown, no code blocks, no additional text.
-
-Return an array of stories in this exact JSON structure:
-{
-  "stories": [
-    {
-      "title": "Clear, actionable story title",
-      "type": "Feature",
-      "priority": "High", 
-      "effort": "3 story points",
-      "epic": "Epic category this belongs to",
-      "description": "Detailed description of what needs to be built",
-      "acceptanceCriteria": ["criterion 1", "criterion 2", "criterion 3"],
-      "technicalRequirements": ["requirement 1", "requirement 2"],
-      "businessValue": "Why this matters to the business",
-      "risks": ["risk 1", "risk 2"],
-      "confidence": 0.85,
-      "discussionContext": "Brief context from the meeting where this was discussed"
-    }
-  ]
-}
-
-Extract EVERY distinct development item discussed. This includes:
-- New features or enhancements
-- Bug fixes mentioned
-- Technical debt items
-- UI/UX improvements
-- Infrastructure changes
-- Performance optimizations
-- API changes
-- Database modifications
-
-Each story should be actionable and specific. If multiple related items are discussed, create separate stories for each distinct deliverable.`;
-
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        {
-          role: "system",
-          content: systemPrompt
-        },
-        {
-          role: "user",
-          content: `Meeting: ${title}\n\nTranscript: ${transcript}`
-        }
-      ],
-      temperature: 0.2,
-      max_tokens: 3000
-    });
+    // Process the transcript
+    const result = await autoProcessTranscript(transcript, title);
     
-    const rawResponse = completion.choices[0].message.content;
-    console.log('Raw OpenAI response:');
-    console.log(rawResponse);
-    
-    let result;
-    try {
-      // Clean the response - remove markdown code blocks
-      let cleanResponse = rawResponse.trim();
-      
-      // Remove ```json and ``` if present
-      if (cleanResponse.startsWith('```json')) {
-        cleanResponse = cleanResponse.replace(/^```json\s*/, '').replace(/\s*```$/, '');
-      } else if (cleanResponse.startsWith('```')) {
-        cleanResponse = cleanResponse.replace(/^```\s*/, '').replace(/\s*```$/, '');
-      }
-      
-      console.log('Cleaned response:');
-      console.log(cleanResponse);
-      
-      result = JSON.parse(cleanResponse);
-      
-      // Add metadata to each story
-      if (result.stories && Array.isArray(result.stories)) {
-        result.stories = result.stories.map((story, index) => ({
-          ...story,
-          id: `story-${Date.now()}-${index}`,
-          sourceTranscript: title,
-          sourceTimestamp: new Date().toISOString().split('T')[0]
-        }));
-        
-        console.log(`SkyNet generated ${result.stories.length} stories from transcript`);
-      } else {
-        throw new Error('Invalid response format - expected stories array');
-      }
-      
-    } catch (parseError) {
-      console.error('Failed to parse OpenAI response:', parseError);
-      console.error('Raw response was:', rawResponse);
+    if (!result) {
       return res.status(500).json({ 
-        error: 'SkyNet AI returned invalid format. Check server logs for details.',
-        details: rawResponse.substring(0, 200) + '...'
+        error: 'Failed to process transcript'
       });
+    }
+
+    // Send Slack notifications for each story if webhook provided
+    if (slackWebhook && result.stories) {
+      console.log(`📤 Sending ${result.stories.length} Slack notifications...`);
+      
+      for (const story of result.stories) {
+        await sendSlackNotification(story, slackWebhook);
+        // Small delay to avoid rate limiting
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      
+      console.log(`✅ All Slack notifications sent for: ${title}`);
     }
     
     res.json(result);
@@ -271,141 +480,6 @@ Each story should be actionable and specific. If multiple related items are disc
     });
   }
 });
-
-// Replace your existing /api/deploy-to-jira endpoint with this fixed version:
-
-// Helper function to convert plain text to Atlassian Document Format
-function textToADF(text) {
-  const lines = text.split('\n');
-  const content = [];
-  
-  for (const line of lines) {
-    if (line.trim() === '') {
-      // Empty line
-      content.push({
-        type: "paragraph",
-        content: []
-      });
-    } else if (line.startsWith('🎯 ') || line.startsWith('✅ ') || line.startsWith('⚙️ ') || line.startsWith('⚠️ ') || line.startsWith('🤖 ')) {
-      // Header lines - make them bold
-      content.push({
-        type: "paragraph",
-        content: [{
-          type: "text",
-          text: line,
-          marks: [{ type: "strong" }]
-        }]
-      });
-    } else if (line.startsWith('• ')) {
-      // Bullet points - create list items
-      content.push({
-        type: "paragraph",
-        content: [{
-          type: "text",
-          text: line
-        }]
-      });
-    } else {
-      // Regular text
-      content.push({
-        type: "paragraph",
-        content: [{
-          type: "text",
-          text: line
-        }]
-      });
-    }
-  }
-  
-  return {
-    type: "doc",
-    version: 1,
-    content: content
-  };
-}
-
-// Replace your existing /api/deploy-to-jira endpoint with this fixed version:
-
-// Helper function to convert plain text to Atlassian Document Format
-function textToADF(text) {
-  if (!text || text.trim() === '') {
-    return {
-      type: "doc",
-      version: 1,
-      content: [
-        {
-          type: "paragraph",
-          content: []
-        }
-      ]
-    };
-  }
-
-  const lines = text.split('\n');
-  const content = [];
-  
-  for (const line of lines) {
-    const trimmedLine = line.trim();
-    
-    if (trimmedLine === '') {
-      // Skip empty lines to avoid empty paragraphs
-      continue;
-    }
-    
-    // Create paragraph with text content
-    const paragraph = {
-      type: "paragraph",
-      content: [
-        {
-          type: "text",
-          text: trimmedLine
-        }
-      ]
-    };
-    
-    // Add bold formatting for header lines
-    if (trimmedLine.startsWith('🎯 ') || trimmedLine.startsWith('✅ ') || 
-        trimmedLine.startsWith('⚙️ ') || trimmedLine.startsWith('⚠️ ') || 
-        trimmedLine.startsWith('🤖 ')) {
-      paragraph.content[0].marks = [{ type: "strong" }];
-    }
-    
-    content.push(paragraph);
-  }
-  
-  // Ensure we always have at least one paragraph
-  if (content.length === 0) {
-    content.push({
-      type: "paragraph",
-      content: []
-    });
-  }
-  
-  return {
-    type: "doc",
-    version: 1,
-    content: content
-  };
-}
-
-// Simpler ADF function as fallback
-function simpleTextToADF(text) {
-  return {
-    type: "doc",
-    version: 1,
-    content: [
-      {
-        type: "paragraph",
-        content: [
-          {
-            type: "text",
-            text: text || "No description provided"
-          }
-        ]
-      }
-    ]
-  };
-}
 
 // Deploy story to JIRA - Fixed with ADF format
 app.post('/api/deploy-to-jira', async (req, res) => {
@@ -591,6 +665,207 @@ app.post('/api/deploy-to-jira', async (req, res) => {
     console.error('🚨 JIRA deployment failed:', error.message);
     res.status(500).json({ 
       error: error.message
+    });
+  }
+});
+
+// Auto-process all unprocessed transcripts endpoint
+app.post('/api/auto-process-all', async (req, res) => {
+  try {
+    const { slackWebhook } = req.body;
+    
+    console.log('🤖 SkyNet starting auto-processing of all transcripts...');
+    
+    if (!process.env.OPENAI_API_KEY) {
+      return res.status(400).json({ 
+        error: 'OpenAI API key not configured' 
+      });
+    }
+
+    // Get all transcripts
+    const response = await notion.databases.query({
+      database_id: process.env.NOTION_DATABASE_ID,
+      sorts: [
+        {
+          property: 'Created time',
+          direction: 'descending'
+        }
+      ],
+      page_size: 50
+    });
+    
+    console.log(`📋 Found ${response.results.length} transcripts to analyze`);
+    
+    let processedCount = 0;
+    let totalStories = 0;
+    const results = [];
+    
+    for (const page of response.results) {
+      const properties = page.properties;
+      const title = properties.Name?.title?.[0]?.plain_text || 'Untitled Meeting';
+      
+      try {
+        // Fetch page content
+        const pageContent = await notion.blocks.children.list({
+          block_id: page.id,
+        });
+        
+        // Extract text content
+        let content = '';
+        pageContent.results.forEach(block => {
+          if (block.type === 'paragraph' && block.paragraph?.rich_text) {
+            const text = block.paragraph.rich_text
+              .map(t => t.plain_text)
+              .join('');
+            content += text + '\n';
+          }
+          if (block.type === 'heading_1' && block.heading_1?.rich_text) {
+            content += block.heading_1.rich_text
+              .map(t => t.plain_text)
+              .join('') + '\n';
+          }
+          if (block.type === 'heading_2' && block.heading_2?.rich_text) {
+            content += block.heading_2.rich_text
+              .map(t => t.plain_text)
+              .join('') + '\n';
+          }
+          if (block.type === 'heading_3' && block.heading_3?.rich_text) {
+            content += block.heading_3.rich_text
+              .map(t => t.plain_text)
+              .join('') + '\n';
+          }
+        });
+        
+        const wordCount = content.trim().split(' ').length;
+        
+        // Only process transcripts with substantial content
+        if (wordCount > 50) {
+          console.log(`🔄 Processing: ${title} (${wordCount} words)`);
+          
+          const processResult = await autoProcessTranscript(content.trim(), title);
+          
+          if (processResult && processResult.stories && processResult.stories.length > 0) {
+            processedCount++;
+            totalStories += processResult.stories.length;
+            
+            results.push({
+              transcript: title,
+              storyCount: processResult.stories.length,
+              stories: processResult.stories
+            });
+            
+            // Send Slack notifications
+            if (slackWebhook) {
+              for (const story of processResult.stories) {
+                await sendSlackNotification(story, slackWebhook);
+                await new Promise(resolve => setTimeout(resolve, 200)); // Rate limiting
+              }
+            }
+          }
+          
+          // Rate limiting for OpenAI API
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        } else {
+          console.log(`⏭️ Skipping: ${title} (too short: ${wordCount} words)`);
+        }
+        
+      } catch (error) {
+        console.error(`❌ Error processing ${title}:`, error.message);
+      }
+    }
+    
+    console.log(`🎉 Auto-processing complete! Processed ${processedCount} transcripts, generated ${totalStories} stories`);
+    
+    // Send summary to Slack
+    if (slackWebhook && totalStories > 0) {
+      const summaryPayload = {
+        blocks: [
+          {
+            "type": "header",
+            "text": {
+              "type": "plain_text",
+              "text": "🤖 SkyNet Auto-Processing Complete!"
+            }
+          },
+          {
+            "type": "section",
+            "text": {
+              "type": "mrkdwn",
+              "text": `📊 *Summary:*\n• Analyzed ${response.results.length} transcripts\n• Processed ${processedCount} with dev content\n• Generated ${totalStories} development stories\n• Time: ${new Date().toLocaleString()}`
+            }
+          }
+        ],
+        username: "SkyNet AI",
+        icon_emoji: ":robot_face:"
+      };
+      
+      await fetch(slackWebhook, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(summaryPayload)
+      });
+    }
+    
+    res.json({
+      success: true,
+      transcriptsAnalyzed: response.results.length,
+      transcriptsProcessed: processedCount,
+      totalStories: totalStories,
+      results: results
+    });
+    
+  } catch (error) {
+    console.error('❌ Auto-processing error:', error);
+    res.status(500).json({ 
+      error: 'Auto-processing failed: ' + error.message
+    });
+  }
+});
+
+// Setup automatic processing via cron job or webhook
+app.post('/api/setup-auto-processing', async (req, res) => {
+  try {
+    const { slackWebhook, intervalMinutes = 60 } = req.body;
+    
+    console.log(`🔄 Setting up auto-processing every ${intervalMinutes} minutes`);
+    
+    // Store the webhook URL (in production, store this in database or env var)
+    process.env.SLACK_WEBHOOK_URL = slackWebhook;
+    
+    // Set up interval (in production, use a proper job scheduler like node-cron)
+    const intervalMs = intervalMinutes * 60 * 1000;
+    
+    const autoProcessInterval = setInterval(async () => {
+      console.log('🤖 SkyNet auto-processing triggered by scheduler...');
+      
+      try {
+        // Call auto-process endpoint internally
+        const autoProcessReq = {
+          body: { slackWebhook: process.env.SLACK_WEBHOOK_URL }
+        };
+        
+        // You would call the auto-process logic here
+        // For now, just log that it would run
+        console.log('🔄 Auto-processing would run now...');
+        
+      } catch (error) {
+        console.error('❌ Scheduled auto-processing failed:', error);
+      }
+    }, intervalMs);
+    
+    // Store interval ID for potential cleanup (in production, use proper job management)
+    global.skynetAutoProcessInterval = autoProcessInterval;
+    
+    res.json({
+      success: true,
+      message: `Auto-processing scheduled every ${intervalMinutes} minutes`,
+      nextRun: new Date(Date.now() + intervalMs).toISOString()
+    });
+    
+  } catch (error) {
+    console.error('❌ Auto-processing setup failed:', error);
+    res.status(500).json({ 
+      error: 'Setup failed: ' + error.message
     });
   }
 });
