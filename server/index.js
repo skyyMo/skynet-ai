@@ -14,7 +14,7 @@ app.use(express.json());
 
 // Serve static files from React build in production
 if (process.env.NODE_ENV === 'production') {
-  app.use(express.static(path.join(__dirname, '../client/build')));
+  app.use(express.static(path.join(__dirname, 'build')));
 }
 
 // Initialize Notion
@@ -251,221 +251,6 @@ Each story should be actionable and specific. If multiple related items are disc
   }
 }
 
-// Function to check for new transcripts and process them automatically
-async function checkForNewTranscripts() {
-  try {
-    console.log('🔍 SkyNet checking for new transcripts...');
-    
-    if (!process.env.NOTION_TOKEN || !process.env.NOTION_DATABASE_ID) {
-      console.log('⚠️ Notion credentials not configured');
-      return;
-    }
-
-    // Get recent transcripts (last 6 hours to catch new ones)
-    const sixHoursAgo = new Date();
-    sixHoursAgo.setHours(sixHoursAgo.getHours() - 6);
-    
-    const response = await notion.databases.query({
-      database_id: process.env.NOTION_DATABASE_ID,
-      filter: {
-        property: 'Created time',
-        created_time: {
-          after: sixHoursAgo.toISOString()
-        }
-      },
-      sorts: [
-        {
-          property: 'Created time',
-          direction: 'descending'
-        }
-      ],
-      page_size: 20
-    });
-    
-    console.log(`📋 Found ${response.results.length} recent transcripts`);
-    
-    let newTranscripts = 0;
-    let totalNewStories = 0;
-    
-    for (const page of response.results) {
-      // Skip if we've already processed this transcript
-      if (processedTranscriptIds.has(page.id)) {
-        continue;
-      }
-      
-      const properties = page.properties;
-      const title = properties.Name?.title?.[0]?.plain_text || 'Untitled Meeting';
-      
-      try {
-        // Fetch page content
-        const pageContent = await notion.blocks.children.list({
-          block_id: page.id,
-        });
-        
-        // Extract text content
-        let content = '';
-        pageContent.results.forEach(block => {
-          if (block.type === 'paragraph' && block.paragraph?.rich_text) {
-            const text = block.paragraph.rich_text
-              .map(t => t.plain_text)
-              .join('');
-            content += text + '\n';
-          }
-          if (block.type === 'heading_1' && block.heading_1?.rich_text) {
-            content += block.heading_1.rich_text
-              .map(t => t.plain_text)
-              .join('') + '\n';
-          }
-          if (block.type === 'heading_2' && block.heading_2?.rich_text) {
-            content += block.heading_2.rich_text
-              .map(t => t.plain_text)
-              .join('') + '\n';
-          }
-          if (block.type === 'heading_3' && block.heading_3?.rich_text) {
-            content += block.heading_3.rich_text
-              .map(t => t.plain_text)
-              .join('') + '\n';
-          }
-        });
-        
-        const wordCount = content.trim().split(' ').length;
-        
-        // Only process transcripts with substantial content
-        if (wordCount > 50) {
-          console.log(`🆕 New transcript detected: ${title} (${wordCount} words)`);
-          
-          const processResult = await autoProcessTranscript(content.trim(), title);
-          
-          if (processResult && processResult.stories && processResult.stories.length > 0) {
-            newTranscripts++;
-            totalNewStories += processResult.stories.length;
-            
-            // Send Slack notifications if webhook is configured
-            if (process.env.SLACK_WEBHOOK_URL) {
-              // Send individual story notifications
-              for (const story of processResult.stories) {
-                await sendSlackNotification(story, process.env.SLACK_WEBHOOK_URL);
-                await new Promise(resolve => setTimeout(resolve, 200));
-              }
-              
-              // Send new transcript notification
-              const newTranscriptPayload = {
-                blocks: [
-                  {
-                    "type": "header",
-                    "text": {
-                      "type": "plain_text",
-                      "text": `🆕 New Meeting Processed: ${title}`
-                    }
-                  },
-                  {
-                    "type": "section",
-                    "text": {
-                      "type": "mrkdwn",
-                      "text": `📊 Generated *${processResult.stories.length}* development stories from this meeting\n⏰ Processed at: ${new Date().toLocaleString()}`
-                    }
-                  }
-                ],
-                username: "SkyNet AI",
-                icon_emoji: ":robot_face:"
-              };
-              
-              await fetch(process.env.SLACK_WEBHOOK_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(newTranscriptPayload)
-              });
-            }
-            
-            // Mark as processed
-            processedTranscriptIds.add(page.id);
-            
-            console.log(`✅ Processed new transcript: ${title} (${processResult.stories.length} stories)`);
-          } else {
-            console.log(`⚠️ No stories found in: ${title}`);
-            // Still mark as processed to avoid re-checking
-            processedTranscriptIds.add(page.id);
-          }
-          
-          // Rate limiting
-          await new Promise(resolve => setTimeout(resolve, 2000));
-        } else {
-          console.log(`⏭️ Skipping: ${title} (too short: ${wordCount} words)`);
-          processedTranscriptIds.add(page.id);
-        }
-        
-      } catch (error) {
-        console.error(`❌ Error processing new transcript ${title}:`, error.message);
-        // Don't mark as processed if there was an error, so we can retry
-      }
-    }
-    
-    if (newTranscripts > 0) {
-      console.log(`🎉 Auto-processing complete! Found ${newTranscripts} new transcripts, generated ${totalNewStories} stories`);
-    } else {
-      console.log('✅ No new transcripts to process');
-    }
-    
-  } catch (error) {
-    console.error('❌ Error checking for new transcripts:', error);
-  }
-}
-
-// Function to initialize processed transcript tracking
-async function initializeProcessedTranscripts() {
-  try {
-    console.log('🔄 Initializing processed transcripts tracking...');
-    
-    // Get all existing transcripts to mark as "already processed"
-    const response = await notion.databases.query({
-      database_id: process.env.NOTION_DATABASE_ID,
-      sorts: [
-        {
-          property: 'Created time',
-          direction: 'descending'
-        }
-      ],
-      page_size: 100
-    });
-    
-    // Mark all existing transcripts as processed
-    response.results.forEach(page => {
-      processedTranscriptIds.add(page.id);
-    });
-    
-    console.log(`📝 Marked ${response.results.length} existing transcripts as processed`);
-    
-  } catch (error) {
-    console.error('❌ Error initializing processed transcripts:', error);
-  }
-}
-
-// Start automatic detection when server starts
-async function startAutoDetection() {
-  if (!process.env.OPENAI_API_KEY) {
-    console.log('⚠️ OpenAI API key not configured - auto-detection disabled');
-    return;
-  }
-  
-  // Initialize tracking
-  await initializeProcessedTranscripts();
-  
-  // Schedule checks every 5 minutes
-  cron.schedule('*/5 * * * *', () => {
-    console.log('⏰ Cron job triggered - checking for new transcripts...');
-    checkForNewTranscripts();
-  });
-  
-  console.log('🤖 SkyNet auto-detection started - checking every 5 minutes');
-  console.log('📅 Cron schedule: */5 * * * * (every 5 minutes)');
-  
-  // Also check immediately on startup (after a delay)
-  setTimeout(() => {
-    console.log('🚀 Running initial transcript check...');
-    checkForNewTranscripts();
-  }, 30000); // Wait 30 seconds after server start
-}
-
 // Helper function to convert plain text to Atlassian Document Format
 function textToADF(text) {
   if (!text || text.trim() === '') {
@@ -488,11 +273,9 @@ function textToADF(text) {
     const trimmedLine = line.trim();
     
     if (trimmedLine === '') {
-      // Skip empty lines to avoid empty paragraphs
       continue;
     }
     
-    // Create paragraph with text content
     const paragraph = {
       type: "paragraph",
       content: [
@@ -503,7 +286,6 @@ function textToADF(text) {
       ]
     };
     
-    // Add bold formatting for header lines
     if (trimmedLine.startsWith('🎯 ') || trimmedLine.startsWith('✅ ') || 
         trimmedLine.startsWith('⚙️ ') || trimmedLine.startsWith('⚠️ ') || 
         trimmedLine.startsWith('🤖 ')) {
@@ -513,7 +295,6 @@ function textToADF(text) {
     content.push(paragraph);
   }
   
-  // Ensure we always have at least one paragraph
   if (content.length === 0) {
     content.push({
       type: "paragraph",
@@ -547,27 +328,428 @@ function simpleTextToADF(text) {
   };
 }
 
-module.exports = app;
+// API ROUTES
+// Test route
+app.get('/api/health', (req, res) => {
+  res.json({ 
+    status: 'SkyNet AI is online and operational! 🤖',
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development',
+    autoDetection: {
+      enabled: !!process.env.OPENAI_API_KEY,
+      processedCount: processedTranscriptIds.size,
+      slackConfigured: !!process.env.SLACK_WEBHOOK_URL
+    }
+  });
+});
 
-// Start auto-detection if this file is run directly
-if (require.main === module) {
-  const port = process.env.PORT || 3001;
-  
-  app.listen(port, async () => {
-    console.log(`🤖 SkyNet AI server operational on port ${port}`);
-    console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
-    console.log(`Health check: http://localhost:${port}/api/health`);
-    console.log('Environment variables loaded:', {
-      hasNotionToken: !!process.env.NOTION_TOKEN,
-      hasNotionDB: !!process.env.NOTION_DATABASE_ID,
-      hasOpenAI: !!process.env.OPENAI_API_KEY,
-      hasSlackWebhook: !!process.env.SLACK_WEBHOOK_URL
+// Get transcripts from Notion
+app.get('/api/transcripts', async (req, res) => {
+  try {
+    console.log('SkyNet fetching transcripts...');
+    
+    if (!process.env.NOTION_TOKEN) {
+      return res.status(400).json({ 
+        error: 'NOTION_TOKEN not found in environment variables' 
+      });
+    }
+
+    if (!process.env.NOTION_DATABASE_ID) {
+      return res.status(400).json({ 
+        error: 'NOTION_DATABASE_ID not found in environment variables' 
+      });
+    }
+
+    const response = await notion.databases.query({
+      database_id: process.env.NOTION_DATABASE_ID,
+      sorts: [
+        {
+          property: 'Created time',
+          direction: 'descending'
+        }
+      ],
+      page_size: 20
     });
     
-    // Start auto-detection
-    console.log('🚀 Starting SkyNet auto-detection...');
-    await startAutoDetection();
+    console.log(`Found ${response.results.length} pages`);
     
-    console.log('🎯 SkyNet is now fully operational and monitoring for new transcripts!');
+    const transcriptPromises = response.results.map(async (page) => {
+      const properties = page.properties;
+      
+      try {
+        console.log(`Fetching content for: ${properties.Name?.title?.[0]?.plain_text}`);
+        
+        const pageContent = await notion.blocks.children.list({
+          block_id: page.id,
+        });
+        
+        let content = '';
+        pageContent.results.forEach(block => {
+          if (block.type === 'paragraph' && block.paragraph?.rich_text) {
+            const text = block.paragraph.rich_text
+              .map(t => t.plain_text)
+              .join('');
+            content += text + '\n';
+          }
+          if (block.type === 'heading_1' && block.heading_1?.rich_text) {
+            content += block.heading_1.rich_text
+              .map(t => t.plain_text)
+              .join('') + '\n';
+          }
+          if (block.type === 'heading_2' && block.heading_2?.rich_text) {
+            content += block.heading_2.rich_text
+              .map(t => t.plain_text)
+              .join('') + '\n';
+          }
+          if (block.type === 'heading_3' && block.heading_3?.rich_text) {
+            content += block.heading_3.rich_text
+              .map(t => t.plain_text)
+              .join('') + '\n';
+          }
+        });
+        
+        return {
+          id: page.id,
+          title: properties.Name?.title?.[0]?.plain_text || 'Untitled Meeting',
+          content: content.trim(),
+          date: properties['Created time']?.created_time?.split('T')[0] || '',
+          createdTime: properties['Created time']?.created_time || '',
+          wordCount: content.trim().split(' ').length,
+          processed: processedTranscriptIds.has(page.id),
+          autoProcessed: processedTranscriptIds.has(page.id)
+        };
+      } catch (contentError) {
+        console.error(`Error fetching content for ${properties.Name?.title?.[0]?.plain_text}:`, contentError);
+        return {
+          id: page.id,
+          title: properties.Name?.title?.[0]?.plain_text || 'Untitled Meeting',
+          content: '',
+          date: properties['Created time']?.created_time?.split('T')[0] || '',
+          createdTime: properties['Created time']?.created_time || '',
+          wordCount: 0,
+          processed: false,
+          autoProcessed: false,
+          error: 'Failed to fetch content'
+        };
+      }
+    });
+    
+    const transcripts = await Promise.all(transcriptPromises);
+    const validTranscripts = transcripts.filter(t => t.wordCount > 50);
+    
+    console.log(`Returning ${validTranscripts.length} transcripts with content`);
+    
+    res.json(validTranscripts);
+  } catch (error) {
+    console.error('Notion API Error:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch transcripts',
+      details: error.message 
+    });
+  }
+});
+
+// Process transcript with AI - Updated with Slack status tracking
+app.post('/api/process-transcript', async (req, res) => {
+  try {
+    const { transcript, title, slackWebhook } = req.body;
+    
+    if (!process.env.OPENAI_API_KEY) {
+      return res.status(400).json({ 
+        error: 'OpenAI API key not configured. Add OPENAI_API_KEY to your environment variables' 
+      });
+    }
+
+    if (!transcript || transcript.length < 100) {
+      return res.status(400).json({ 
+        error: 'Transcript too short or missing' 
+      });
+    }
+
+    console.log(`SkyNet processing transcript: ${title}`);
+    console.log(`Transcript length: ${transcript.length} characters`);
+
+    const result = await autoProcessTranscript(transcript, title);
+    
+    if (!result) {
+      return res.status(500).json({ 
+        error: 'Failed to process transcript'
+      });
+    }
+
+    const slackResults = [];
+    if (slackWebhook && result.stories) {
+      console.log(`📤 Sending ${result.stories.length} Slack notifications...`);
+      
+      for (const story of result.stories) {
+        const slackStatus = await sendSlackNotification(story, slackWebhook);
+        
+        story.slackStatus = slackStatus;
+        slackResults.push({
+          storyId: story.id,
+          storyTitle: story.title,
+          slackStatus: slackStatus
+        });
+        
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      
+      console.log(`✅ Slack notifications completed for: ${title}`);
+    }
+
+    const response = {
+      ...result,
+      slackSummary: {
+        enabled: !!slackWebhook,
+        totalStories: result.stories?.length || 0,
+        successfulNotifications: slackResults.filter(r => r.slackStatus.success).length,
+        failedNotifications: slackResults.filter(r => r.slackStatus.success === false).length,
+        results: slackResults
+      }
+    };
+    
+    res.json(response);
+  } catch (error) {
+    console.error('OpenAI API Error:', error);
+    res.status(500).json({ 
+      error: 'SkyNet AI processing failed: ' + error.message,
+      details: error.response?.data || error.message 
+    });
+  }
+});
+
+// Deploy story to JIRA
+app.post('/api/deploy-to-jira', async (req, res) => {
+  try {
+    const { story, jiraConfig } = req.body;
+    
+    console.log(`🤖 SkyNet attempting JIRA deployment for: ${story.title}`);
+
+    let cleanUrl = jiraConfig.url.trim();
+    if (!cleanUrl.startsWith('http')) {
+      cleanUrl = 'https://' + cleanUrl;
+    }
+    cleanUrl = cleanUrl.replace(/\/$/, '');
+
+    const auth = Buffer.from(`${jiraConfig.email}:${jiraConfig.token}`).toString('base64');
+    
+    const authTest = await fetch(`${cleanUrl}/rest/api/3/myself`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Basic ${auth}`,
+        'Accept': 'application/json',
+        'User-Agent': 'SkyNet-AI/1.0'
+      }
+    });
+
+    if (!authTest.ok) {
+      throw new Error('JIRA Authentication failed');
+    }
+
+    const descriptionText = [
+      story.description,
+      '',
+      '🎯 Business Value:',
+      story.businessValue,
+      '',
+      '✅ Acceptance Criteria:',
+      ...story.acceptanceCriteria.map(criteria => `• ${criteria}`),
+      '',
+      '⚙️ Technical Requirements:',
+      ...story.technicalRequirements.map(req => `• ${req}`),
+      '',
+      '⚠️ Risks:',
+      ...story.risks.map(risk => `• ${risk}`),
+      '',
+      `🤖 Generated by SkyNet AI from: ${story.sourceTranscript}`,
+      `Confidence: ${Math.round(story.confidence * 100)}% | Date: ${story.sourceTimestamp}`
+    ].join('\n');
+
+    let adfDescription;
+    try {
+      adfDescription = textToADF(descriptionText);
+    } catch (e) {
+      adfDescription = simpleTextToADF(descriptionText);
+    }
+
+    const jiraTicket = {
+      fields: {
+        project: {
+          key: jiraConfig.projectKey
+        },
+        summary: story.title,
+        description: adfDescription,
+        issuetype: {
+          name: 'Story'
+        }
+      }
+    };
+
+    if (story.priority && ['Highest', 'High', 'Medium', 'Low', 'Lowest'].includes(story.priority)) {
+      jiraTicket.fields.priority = { name: story.priority };
+    }
+
+    const createResponse = await fetch(`${cleanUrl}/rest/api/3/issue`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Basic ${auth}`,
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        'User-Agent': 'SkyNet-AI/1.0'
+      },
+      body: JSON.stringify(jiraTicket)
+    });
+
+    const createResponseText = await createResponse.text();
+
+    if (!createResponse.ok) {
+      throw new Error(`Ticket creation failed: ${createResponseText}`);
+    }
+
+    const result = JSON.parse(createResponseText);
+
+    res.json({
+      success: true,
+      key: result.key,
+      url: `${cleanUrl}/browse/${result.key}`,
+      id: result.id
+    });
+
+  } catch (error) {
+    console.error('🚨 JIRA deployment failed:', error.message);
+    res.status(500).json({ 
+      error: error.message
+    });
+  }
+});
+
+// Auto-process all transcripts
+app.post('/api/auto-process-all', async (req, res) => {
+  try {
+    const { slackWebhook } = req.body;
+    
+    console.log('🤖 SkyNet starting auto-processing of all transcripts...');
+    
+    if (!process.env.OPENAI_API_KEY) {
+      return res.status(400).json({ 
+        error: 'OpenAI API key not configured' 
+      });
+    }
+
+    const response = await notion.databases.query({
+      database_id: process.env.NOTION_DATABASE_ID,
+      sorts: [
+        {
+          property: 'Created time',
+          direction: 'descending'
+        }
+      ],
+      page_size: 50
+    });
+    
+    let processedCount = 0;
+    let totalStories = 0;
+    let totalSlackSuccess = 0;
+    let totalSlackFailed = 0;
+    const results = [];
+    
+    for (const page of response.results) {
+      const properties = page.properties;
+      const title = properties.Name?.title?.[0]?.plain_text || 'Untitled Meeting';
+      
+      try {
+        const pageContent = await notion.blocks.children.list({
+          block_id: page.id,
+        });
+        
+        let content = '';
+        pageContent.results.forEach(block => {
+          if (block.type === 'paragraph' && block.paragraph?.rich_text) {
+            const text = block.paragraph.rich_text
+              .map(t => t.plain_text)
+              .join('');
+            content += text + '\n';
+          }
+        });
+        
+        const wordCount = content.trim().split(' ').length;
+        
+        if (wordCount > 50) {
+          const processResult = await autoProcessTranscript(content.trim(), title);
+          
+          if (processResult && processResult.stories && processResult.stories.length > 0) {
+            processedCount++;
+            totalStories += processResult.stories.length;
+            
+            const slackResults = [];
+            
+            if (slackWebhook) {
+              for (const story of processResult.stories) {
+                const slackStatus = await sendSlackNotification(story, slackWebhook);
+                if (slackStatus.success) {
+                  totalSlackSuccess++;
+                } else {
+                  totalSlackFailed++;
+                }
+                await new Promise(resolve => setTimeout(resolve, 200));
+              }
+            }
+            
+            results.push({
+              transcript: title,
+              storyCount: processResult.stories.length,
+              stories: processResult.stories
+            });
+          }
+          
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+        
+      } catch (error) {
+        console.error(`❌ Error processing ${title}:`, error.message);
+      }
+    }
+    
+    res.json({
+      success: true,
+      transcriptsAnalyzed: response.results.length,
+      transcriptsProcessed: processedCount,
+      totalStories: totalStories,
+      slackSummary: {
+        enabled: !!slackWebhook,
+        successfulNotifications: totalSlackSuccess,
+        failedNotifications: totalSlackFailed,
+        totalNotifications: totalSlackSuccess + totalSlackFailed
+      },
+      results: results
+    });
+    
+  } catch (error) {
+    console.error('❌ Auto-processing error:', error);
+    res.status(500).json({ 
+      error: 'Auto-processing failed: ' + error.message
+    });
+  }
+});
+
+// Catch all handler for React Router in production
+if (process.env.NODE_ENV === 'production') {
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, 'build', 'index.html'));
   });
 }
+
+// Start server
+app.listen(port, async () => {
+  console.log(`🤖 SkyNet AI server operational on port ${port}`);
+  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`Health check: http://localhost:${port}/api/health`);
+  console.log('Environment variables loaded:', {
+    hasNotionToken: !!process.env.NOTION_TOKEN,
+    hasNotionDB: !!process.env.NOTION_DATABASE_ID,
+    hasOpenAI: !!process.env.OPENAI_API_KEY,
+    hasSlackWebhook: !!process.env.SLACK_WEBHOOK_URL
+  });
+  
+  console.log('🎯 SkyNet is now fully operational!');
+});
