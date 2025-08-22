@@ -10,8 +10,8 @@ function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   
   // New state for sorting and filtering
-  const [sortBy, setSortBy] = useState('date'); // date, confidence, priority
-  const [filterBy, setFilterBy] = useState('all'); // all, recommended, high-confidence, recent
+  const [sortBy, setSortBy] = useState('date');
+  const [filterBy, setFilterBy] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
   
   // JIRA state
@@ -24,32 +24,62 @@ function App() {
   const [showJiraConfig, setShowJiraConfig] = useState(false);
   const [deployingToJira, setDeployingToJira] = useState(null);
 
-  // Load JIRA config from localStorage on startup
+  // Slack integration state
+  const [slackConfig, setSlackConfig] = useState({
+    webhookUrl: ''
+  });
+  const [showSlackConfig, setShowSlackConfig] = useState(false);
+  const [autoProcessing, setAutoProcessing] = useState(false);
+
+  // Load configs from localStorage on startup
   useEffect(() => {
-    const savedConfig = localStorage.getItem('skynet-jira-config');
-    if (savedConfig) {
+    const savedJiraConfig = localStorage.getItem('skynet-jira-config');
+    if (savedJiraConfig) {
       try {
-        const config = JSON.parse(savedConfig);
+        const config = JSON.parse(savedJiraConfig);
         setJiraConfig(config);
         console.log('✅ JIRA config loaded from storage');
       } catch (e) {
         console.log('❌ Failed to load JIRA config from storage');
       }
     }
+
+    const savedSlackConfig = localStorage.getItem('skynet-slack-config');
+    if (savedSlackConfig) {
+      try {
+        const config = JSON.parse(savedSlackConfig);
+        setSlackConfig(config);
+        console.log('✅ Slack config loaded from storage');
+      } catch (e) {
+        console.log('❌ Failed to load Slack config from storage');
+      }
+    }
   }, []);
 
-  // Save JIRA config to localStorage whenever it changes
+  // Save configs
   const saveJiraConfig = (newConfig) => {
     setJiraConfig(newConfig);
     localStorage.setItem('skynet-jira-config', JSON.stringify(newConfig));
     console.log('💾 JIRA config saved to storage');
   };
 
-  // Clear JIRA config
+  const saveSlackConfig = (newConfig) => {
+    setSlackConfig(newConfig);
+    localStorage.setItem('skynet-slack-config', JSON.stringify(newConfig));
+    console.log('💾 Slack config saved to storage');
+  };
+
+  // Clear configs
   const clearJiraConfig = () => {
     setJiraConfig({ url: '', email: '', token: '', projectKey: '' });
     localStorage.removeItem('skynet-jira-config');
     console.log('🗑️ JIRA config cleared');
+  };
+
+  const clearSlackConfig = () => {
+    setSlackConfig({ webhookUrl: '' });
+    localStorage.removeItem('skynet-slack-config');
+    console.log('🗑️ Slack config cleared');
   };
 
   const loadTranscripts = async () => {
@@ -82,7 +112,8 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           transcript: transcript.content,
-          title: transcript.title 
+          title: transcript.title,
+          slackWebhook: slackConfig.webhookUrl || undefined
         })
       });
       
@@ -96,10 +127,20 @@ function App() {
         setActiveTab('stories');
         
         const highConfidenceStories = result.stories.filter(s => s.confidence >= 0.7);
-        alert(`🤖 SkyNet Mission Complete! 🚀\n\n` +
+        
+        let successMessage = `🤖 SkyNet Mission Complete! 🚀\n\n` +
               `Generated ${result.stories.length} autonomous dev stories from "${transcript.title}"\n` +
-              `${highConfidenceStories.length} high-confidence stories ready for deployment.\n\n` +
-              `SkyNet efficiency: ${Math.round((highConfidenceStories.length / result.stories.length) * 100)}%`);
+              `${highConfidenceStories.length} high-confidence stories ready for deployment.\n\n`;
+        
+        if (result.slackSummary?.enabled) {
+          successMessage += `📱 Slack Notifications:\n` +
+            `✅ ${result.slackSummary.successfulNotifications} sent successfully\n` +
+            `❌ ${result.slackSummary.failedNotifications} failed\n\n`;
+        }
+        
+        successMessage += `SkyNet efficiency: ${Math.round((highConfidenceStories.length / result.stories.length) * 100)}%`;
+        
+        alert(successMessage);
       } else {
         setError(result.error || 'Failed to process transcript');
         alert('❌ Error: ' + (result.error || 'Failed to process transcript'));
@@ -122,6 +163,60 @@ function App() {
     }
     
     setLoading(false);
+  };
+
+  const autoProcessAll = async () => {
+    if (!window.confirm('🤖 SkyNet will autonomously process ALL transcripts. Continue?')) {
+      return;
+    }
+    
+    setAutoProcessing(true);
+    setError('');
+    
+    try {
+      const response = await fetch('/api/auto-process-all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          slackWebhook: slackConfig.webhookUrl || undefined
+        })
+      });
+      
+      const result = await response.json();
+      
+      if (response.ok) {
+        const allNewStories = result.results.flatMap(r => r.stories || []);
+        setProcessedStories(prev => [...prev, ...allNewStories]);
+        
+        setTranscripts(prev => prev.map(t => ({
+          ...t,
+          processed: true
+        })));
+        
+        setActiveTab('stories');
+        
+        let successMessage = `🎉 SkyNet Auto-Processing Complete!\n\n` +
+          `📊 Analyzed: ${result.transcriptsAnalyzed} transcripts\n` +
+          `⚡ Processed: ${result.transcriptsProcessed} with dev content\n` +
+          `🚀 Generated: ${result.totalStories} development stories\n`;
+        
+        if (result.slackSummary?.enabled) {
+          successMessage += `\n📱 Slack Notifications:\n` +
+            `✅ ${result.slackSummary.successfulNotifications} sent\n` +
+            `❌ ${result.slackSummary.failedNotifications} failed\n`;
+        }
+        
+        alert(successMessage);
+      } else {
+        setError(result.error || 'Auto-processing failed');
+        alert('❌ Auto-processing failed: ' + result.error);
+      }
+    } catch (err) {
+      setError('Auto-processing error: ' + err.message);
+      alert('❌ Auto-processing error: ' + err.message);
+    }
+    
+    setAutoProcessing(false);
   };
 
   const deployToJira = async (story) => {
@@ -164,7 +259,6 @@ function App() {
   const getSortedAndFilteredStories = () => {
     let stories = [...processedStories];
 
-    // Apply search filter
     if (searchTerm) {
       stories = stories.filter(story => 
         story.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -173,7 +267,6 @@ function App() {
       );
     }
 
-    // Apply category filter
     switch (filterBy) {
       case 'recommended':
         stories = stories.filter(s => s.confidence >= 0.8 && s.priority === 'High');
@@ -193,7 +286,6 @@ function App() {
         break;
     }
 
-    // Apply sorting
     switch (sortBy) {
       case 'confidence':
         stories.sort((a, b) => b.confidence - a.confidence);
@@ -223,65 +315,20 @@ function App() {
   useEffect(() => {
     loadTranscripts();
     
-    // Add SkyNet animations to the document
     const style = document.createElement('style');
     style.textContent = `
-      @keyframes pulse {
-        0%, 100% { opacity: 1; }
-        50% { opacity: 0.5; }
-      }
-      
-      @keyframes rotate {
-        from { transform: rotate(0deg); }
-        to { transform: rotate(360deg); }
-      }
-      
-      @keyframes spin {
-        from { transform: rotate(0deg); }
-        to { transform: rotate(360deg); }
-      }
-      
-      @keyframes bounce {
-        0%, 20%, 50%, 80%, 100% { transform: translateY(0); }
-        40% { transform: translateY(-10px); }
-        60% { transform: translateY(-5px); }
-      }
-      
-      @keyframes glow {
-        from { box-shadow: 0 0 20px rgba(59, 130, 246, 0.5); }
-        to { box-shadow: 0 0 30px rgba(59, 130, 246, 0.8), 0 0 40px rgba(139, 92, 246, 0.3); }
-      }
-      
-      @keyframes skynetPulse {
-        0% { 
-          background-position: 0% 50%;
-          box-shadow: 0 0 25px rgba(59, 130, 246, 0.7);
-        }
-        50% { 
-          background-position: 100% 50%;
-          box-shadow: 0 0 35px rgba(139, 92, 246, 0.9), 0 0 50px rgba(59, 130, 246, 0.5);
-        }
-        100% { 
-          background-position: 0% 50%;
-          box-shadow: 0 0 25px rgba(59, 130, 246, 0.7);
-        }
-      }
-      
-      @keyframes shimmer {
-        0% { background-position: -200% 0; }
-        100% { background-position: 200% 0; }
-      }
-      
-      @keyframes float {
-        0%, 100% { transform: translateY(0px); }
-        50% { transform: translateY(-20px); }
-      }
+      @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+      @keyframes rotate { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+      @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+      @keyframes bounce { 0%, 20%, 50%, 80%, 100% { transform: translateY(0); } 40% { transform: translateY(-10px); } 60% { transform: translateY(-5px); } }
+      @keyframes glow { from { box-shadow: 0 0 20px rgba(59, 130, 246, 0.5); } to { box-shadow: 0 0 30px rgba(59, 130, 246, 0.8), 0 0 40px rgba(139, 92, 246, 0.3); } }
+      @keyframes skynetPulse { 0% { background-position: 0% 50%; box-shadow: 0 0 25px rgba(59, 130, 246, 0.7); } 50% { background-position: 100% 50%; box-shadow: 0 0 35px rgba(139, 92, 246, 0.9), 0 0 50px rgba(59, 130, 246, 0.5); } 100% { background-position: 0% 50%; box-shadow: 0 0 25px rgba(59, 130, 246, 0.7); } }
+      @keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+      @keyframes float { 0%, 100% { transform: translateY(0px); } 50% { transform: translateY(-20px); } }
     `;
     document.head.appendChild(style);
     
-    return () => {
-      document.head.removeChild(style);
-    };
+    return () => document.head.removeChild(style);
   }, []);
 
   const formatDate = (dateString) => {
@@ -309,7 +356,30 @@ function App() {
     }
   };
 
-  // Styles
+  const getSlackStatusIndicator = (story) => {
+    if (!story.slackStatus) {
+      return (
+        <span style={{ fontSize: '12px', color: '#6b7280' }}>
+          📱 Not sent to Slack
+        </span>
+      );
+    }
+    
+    if (story.slackStatus.success) {
+      return (
+        <span style={{ fontSize: '12px', color: '#22c55e', display: 'flex', alignItems: 'center', gap: '4px' }}>
+          ✅ Slack sent ({story.slackStatus.responseTime}ms)
+        </span>
+      );
+    } else {
+      return (
+        <span style={{ fontSize: '12px', color: '#ef4444', display: 'flex', alignItems: 'center', gap: '4px' }}>
+          ❌ Slack failed: {story.slackStatus.error?.substring(0, 30)}...
+        </span>
+      );
+    }
+  };
+
   const styles = {
     container: {
       minHeight: '100vh',
@@ -466,7 +536,7 @@ function App() {
           <div style={{
             ...styles.logo,
             background: 'linear-gradient(135deg, #3b82f6, #8b5cf6)',
-            animation: processingId ? 'pulse 2s infinite' : 'none'
+            animation: processingId || autoProcessing ? 'pulse 2s infinite' : 'none'
           }}>
             <div style={{
               fontSize: '18px',
@@ -511,18 +581,6 @@ function App() {
               ...styles.navButton,
               ...(activeTab === 'transcripts' ? styles.navButtonActive : {})
             }}
-            onMouseEnter={(e) => {
-              if (activeTab !== 'transcripts') {
-                e.target.style.backgroundColor = '#374151';
-                e.target.style.color = 'white';
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (activeTab !== 'transcripts') {
-                e.target.style.backgroundColor = 'transparent';
-                e.target.style.color = '#9ca3af';
-              }
-            }}
           >
             <span>👥</span>
             {sidebarOpen && <span>Transcripts</span>}
@@ -544,18 +602,6 @@ function App() {
             style={{
               ...styles.navButton,
               ...(activeTab === 'stories' ? styles.navButtonActive : {})
-            }}
-            onMouseEnter={(e) => {
-              if (activeTab !== 'stories') {
-                e.target.style.backgroundColor = '#374151';
-                e.target.style.color = 'white';
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (activeTab !== 'stories') {
-                e.target.style.backgroundColor = 'transparent';
-                e.target.style.color = '#9ca3af';
-              }
             }}
           >
             <span>⭐</span>
@@ -617,6 +663,20 @@ function App() {
               <div style={{
                 backgroundColor: '#374151',
                 borderRadius: '8px',
+                padding: '12px',
+                marginBottom: '12px'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: '14px', color: '#d1d5db' }}>Slack Sent</span>
+                  <span style={{ fontWeight: 'bold', color: '#a855f7' }}>
+                    {processedStories.filter(s => s.slackStatus?.success).length}
+                  </span>
+                </div>
+              </div>
+
+              <div style={{
+                backgroundColor: '#374151',
+                borderRadius: '8px',
                 padding: '12px'
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -631,6 +691,23 @@ function App() {
 
           {sidebarOpen && (
             <div style={{ marginTop: '24px' }}>
+              <button
+                onClick={() => setShowSlackConfig(!showSlackConfig)}
+                style={{
+                  ...styles.button,
+                  width: '100%',
+                  background: slackConfig.webhookUrl
+                    ? 'linear-gradient(135deg, #22c55e, #16a34a)'
+                    : 'linear-gradient(135deg, #a855f7, #7c3aed)',
+                  color: 'white',
+                  justifyContent: 'center',
+                  marginBottom: '8px'
+                }}
+              >
+                <span>📱</span>
+                {slackConfig.webhookUrl ? '✅ Slack Connected' : 'Slack Setup'}
+              </button>
+              
               <button
                 onClick={() => setShowJiraConfig(!showJiraConfig)}
                 style={{
@@ -647,7 +724,7 @@ function App() {
                 {jiraConfig.url ? '✅ JIRA Connected' : 'JIRA Setup'}
               </button>
               
-              {jiraConfig.url && (
+              {(jiraConfig.url || slackConfig.webhookUrl) && (
                 <div style={{
                   marginTop: '8px',
                   padding: '8px',
@@ -656,24 +733,50 @@ function App() {
                   fontSize: '12px',
                   color: '#9ca3af'
                 }}>
-                  <div>🌐 {jiraConfig.url.replace('https://', '').replace('http://', '')}</div>
-                  <div>📧 {jiraConfig.email}</div>
-                  <div>📋 {jiraConfig.projectKey}</div>
-                  <button
-                    onClick={clearJiraConfig}
-                    style={{
-                      marginTop: '4px',
-                      padding: '2px 6px',
-                      backgroundColor: '#ef4444',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '4px',
-                      fontSize: '10px',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    🗑️ Clear
-                  </button>
+                  {slackConfig.webhookUrl && (
+                    <div style={{ marginBottom: '4px' }}>📱 Slack notifications enabled</div>
+                  )}
+                  {jiraConfig.url && (
+                    <>
+                      <div>🌐 {jiraConfig.url.replace('https://', '').replace('http://', '')}</div>
+                      <div>📧 {jiraConfig.email}</div>
+                      <div>📋 {jiraConfig.projectKey}</div>
+                    </>
+                  )}
+                  <div style={{ display: 'flex', gap: '4px', marginTop: '4px' }}>
+                    {slackConfig.webhookUrl && (
+                      <button
+                        onClick={clearSlackConfig}
+                        style={{
+                          padding: '2px 6px',
+                          backgroundColor: '#ef4444',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '4px',
+                          fontSize: '10px',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        🗑️ Clear Slack
+                      </button>
+                    )}
+                    {jiraConfig.url && (
+                      <button
+                        onClick={clearJiraConfig}
+                        style={{
+                          padding: '2px 6px',
+                          backgroundColor: '#ef4444',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '4px',
+                          fontSize: '10px',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        🗑️ Clear JIRA
+                      </button>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
@@ -699,7 +802,7 @@ function App() {
       <div style={styles.mainContent}>
         <div style={styles.topBar}>
           <div>
-            <h1 style={{ 
+<h1 style={{ 
               margin: 0, 
               fontSize: '24px', 
               fontWeight: 'bold',
@@ -713,8 +816,8 @@ function App() {
             }}>
               <span style={{
                 fontSize: '28px',
-                animation: processingId ? 'rotate 2s linear infinite' : 'none',
-                filter: processingId ? 'drop-shadow(0 0 10px #3b82f6)' : 'none'
+                animation: processingId || autoProcessing ? 'rotate 2s linear infinite' : 'none',
+                filter: processingId || autoProcessing ? 'drop-shadow(0 0 10px #3b82f6)' : 'none'
               }}>
                 🤖
               </span>
@@ -754,26 +857,52 @@ function App() {
             </button>
 
             {activeTab === 'transcripts' && (
-              <button
-                onClick={processMultiple}
-                disabled={loading || transcripts.filter(t => !t.processed).length === 0}
-                style={{
-                  ...styles.button,
-                  background: 'linear-gradient(135deg, #22c55e, #16a34a)',
-                  color: 'white',
-                  opacity: (loading || transcripts.filter(t => !t.processed).length === 0) ? 0.5 : 1,
-                  cursor: (loading || transcripts.filter(t => !t.processed).length === 0) ? 'not-allowed' : 'pointer',
-                  boxShadow: loading ? '0 0 20px rgba(34, 197, 94, 0.5)' : 'none',
-                  animation: loading ? 'pulse 2s infinite' : 'none'
-                }}
-              >
-                <span style={{
-                  animation: loading ? 'bounce 1s infinite' : 'none'
-                }}>
-                  🤖
-                </span>
-                Deploy SkyNet ({transcripts.filter(t => !t.processed).slice(0, 3).length})
-              </button>
+              <>
+                <button
+                  onClick={processMultiple}
+                  disabled={loading || transcripts.filter(t => !t.processed).length === 0}
+                  style={{
+                    ...styles.button,
+                    background: 'linear-gradient(135deg, #22c55e, #16a34a)',
+                    color: 'white',
+                    opacity: (loading || transcripts.filter(t => !t.processed).length === 0) ? 0.5 : 1,
+                    cursor: (loading || transcripts.filter(t => !t.processed).length === 0) ? 'not-allowed' : 'pointer',
+                    boxShadow: loading ? '0 0 20px rgba(34, 197, 94, 0.5)' : 'none',
+                    animation: loading ? 'pulse 2s infinite' : 'none'
+                  }}
+                >
+                  <span style={{
+                    animation: loading ? 'bounce 1s infinite' : 'none'
+                  }}>
+                    🤖
+                  </span>
+                  Deploy SkyNet ({transcripts.filter(t => !t.processed).slice(0, 3).length})
+                </button>
+
+                <button
+                  onClick={autoProcessAll}
+                  disabled={autoProcessing || transcripts.length === 0}
+                  style={{
+                    ...styles.button,
+                    background: autoProcessing 
+                      ? 'linear-gradient(45deg, #a855f7, #8b5cf6, #a855f7)'
+                      : 'linear-gradient(135deg, #a855f7, #7c3aed)',
+                    backgroundSize: autoProcessing ? '200% 200%' : '100% 100%',
+                    animation: autoProcessing ? 'skynetPulse 2s ease-in-out infinite' : 'none',
+                    color: 'white',
+                    opacity: (autoProcessing || transcripts.length === 0) ? 0.5 : 1,
+                    cursor: (autoProcessing || transcripts.length === 0) ? 'not-allowed' : 'pointer',
+                    boxShadow: autoProcessing ? '0 0 25px rgba(168, 85, 247, 0.7)' : 'none'
+                  }}
+                >
+                  <span style={{
+                    animation: autoProcessing ? 'rotate 1s linear infinite' : 'none'
+                  }}>
+                    ⚡
+                  </span>
+                  {autoProcessing ? 'Auto-Processing...' : `🚀 Auto-Process ALL (${transcripts.length})`}
+                </button>
+              </>
             )}
           </div>
         </div>
@@ -792,10 +921,7 @@ function App() {
           {activeTab === 'transcripts' && (
             <div>
               {transcripts.map(transcript => (
-                <div key={transcript.id} style={{
-                  ...styles.card,
-                  ':hover': { borderColor: '#4b5563' }
-                }}>
+                <div key={transcript.id} style={styles.card}>
                   <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '16px' }}>
                     <div style={{ flex: 1 }}>
                       <h3 style={{ margin: '0 0 8px 0', fontSize: '18px', fontWeight: '600' }}>
@@ -928,7 +1054,6 @@ function App() {
                 marginBottom: '24px'
               }}>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
-                  {/* Search */}
                   <div>
                     <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', color: '#d1d5db', marginBottom: '8px' }}>
                       🔍 Search Stories
@@ -950,7 +1075,6 @@ function App() {
                     />
                   </div>
 
-                  {/* Filter */}
                   <div>
                     <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', color: '#d1d5db', marginBottom: '8px' }}>
                       🎯 Filter
@@ -976,7 +1100,6 @@ function App() {
                     </select>
                   </div>
 
-                  {/* Sort */}
                   <div>
                     <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', color: '#d1d5db', marginBottom: '8px' }}>
                       📊 Sort By
@@ -1001,7 +1124,6 @@ function App() {
                     </select>
                   </div>
 
-                  {/* Quick Actions */}
                   <div>
                     <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', color: '#d1d5db', marginBottom: '8px' }}>
                       🚀 Quick Actions
@@ -1034,7 +1156,6 @@ function App() {
                   </div>
                 </div>
 
-                {/* Results Summary */}
                 <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid #374151' }}>
                   <p style={{ fontSize: '14px', color: '#9ca3af', margin: 0 }}>
                     Showing <span style={{ color: '#60a5fa', fontWeight: '500' }}>{filteredAndSortedStories.length}</span> of <span style={{ color: '#60a5fa', fontWeight: '500' }}>{processedStories.length}</span> stories
@@ -1043,7 +1164,112 @@ function App() {
                 </div>
               </div>
 
-              {/* JIRA Configuration Modal */}
+              {/* Configuration Modals */}
+              {showSlackConfig && (
+                <div style={{
+                  position: 'fixed',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  backgroundColor: 'rgba(0, 0, 0, 0.5)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  zIndex: 1000
+                }}>
+                  <div style={{
+                    backgroundColor: '#1f2937',
+                    borderRadius: '8px',
+                    padding: '24px',
+                    width: '90%',
+                    maxWidth: '400px',
+                    border: '1px solid #374151'
+                  }}>
+                    <h3 style={{ fontSize: '18px', fontWeight: 'bold', color: 'white', marginBottom: '16px' }}>
+                      📱 Slack Configuration
+                    </h3>
+                    
+                    <div style={{ marginBottom: '16px', padding: '12px', backgroundColor: '#374151', borderRadius: '6px', fontSize: '14px', color: '#d1d5db' }}>
+                      🔗 Get your webhook URL from:<br/>
+                      <a href="https://api.slack.com/messaging/webhooks" target="_blank" rel="noopener noreferrer" style={{ color: '#60a5fa' }}>
+                        https://api.slack.com/messaging/webhooks
+                      </a>
+                    </div>
+                    
+                    <div>
+                      <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', color: '#d1d5db', marginBottom: '4px' }}>
+                        Slack Webhook URL
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="https://hooks.slack.com/services/..."
+                        value={slackConfig.webhookUrl}
+                        onChange={(e) => setSlackConfig(prev => ({...prev, webhookUrl: e.target.value}))}
+                        style={{
+                          width: '100%',
+                          padding: '8px 12px',
+                          backgroundColor: '#374151',
+                          border: '1px solid #4b5563',
+                          borderRadius: '6px',
+                          color: 'white'
+                        }}
+                      />
+                    </div>
+                    
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', marginTop: '24px' }}>
+                      <button
+                        onClick={() => setShowSlackConfig(false)}
+                        style={{
+                          padding: '8px 16px',
+                          backgroundColor: '#4b5563',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '6px',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        Cancel
+                      </button>
+                      
+                      <button
+                        onClick={clearSlackConfig}
+                        style={{
+                          padding: '8px 16px',
+                          backgroundColor: '#ef4444',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '6px',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        🗑️ Clear
+                      </button>
+                      
+                      <button
+                        onClick={() => {
+                          saveSlackConfig(slackConfig);
+                          setShowSlackConfig(false);
+                          alert('🤖 Slack configuration saved! SkyNet ready for notifications.');
+                        }}
+                        disabled={!slackConfig.webhookUrl}
+                        style={{
+                          padding: '8px 16px',
+                          background: 'linear-gradient(135deg, #a855f7, #7c3aed)',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                          opacity: !slackConfig.webhookUrl ? 0.5 : 1
+                        }}
+                      >
+                        💾 Save Config
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {showJiraConfig && (
                 <div style={{
                   position: 'fixed',
@@ -1245,8 +1471,9 @@ function App() {
                       </span>
                     </div>
                     
-                    <div style={{ fontSize: '12px', color: '#6b7280' }}>
-                      From: {story.sourceTranscript} • {story.sourceTimestamp}
+                    <div style={{ fontSize: '12px', color: '#6b7280', display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+                      <span>From: {story.sourceTranscript} • {story.sourceTimestamp}</span>
+                      {getSlackStatusIndicator(story)}
                     </div>
                   </div>
 
@@ -1438,5 +1665,3 @@ function App() {
     </div>
   );
 }
-
-export default App;
