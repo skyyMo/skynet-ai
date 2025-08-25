@@ -3,6 +3,7 @@ const cors = require('cors');
 const path = require('path');
 const { Client } = require('@notionhq/client');
 const cron = require('node-cron');
+const fetch = require('node-fetch');
 require('dotenv').config();
 
 const app = express();
