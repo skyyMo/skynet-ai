@@ -736,11 +736,11 @@ app.post('/api/auto-process-all', async (req, res) => {
 
 // Serve static files from React build in production
 if (process.env.NODE_ENV === 'production') {
-  app.use(express.static(path.join(__dirname, 'build')));
+  app.use(express.static(path.join(__dirname, '..', 'build')));
   
   // Catch all handler for React Router - MUST BE THE VERY LAST ROUTE
   app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, 'build', 'index.html'));
+    res.sendFile(path.join(__dirname, '..', 'build', 'index.html'));
   });
 }
 
