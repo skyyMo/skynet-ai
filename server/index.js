@@ -24,6 +24,15 @@ let processedTranscriptIds = new Set();
 // Helper function to send Slack notifications with detailed status tracking
 async function sendSlackNotification(story, webhookUrl) {
   try {
+    console.log(`🔍 Debug: Attempting Slack notification for "${story.title}"`);
+    console.log(`🔍 Webhook URL: ${webhookUrl.substring(0, 50)}...`);
+    console.log(`🔍 URL length: ${webhookUrl.length} characters`);
+    
+    // Validate webhook URL format
+    if (!webhookUrl.startsWith('https://hooks.slack.com/services/')) {
+      throw new Error('Invalid webhook URL format. Must start with https://hooks.slack.com/services/');
+    }
+    
     const blocks = [
       {
         "type": "header",
@@ -113,12 +122,30 @@ async function sendSlackNotification(story, webhookUrl) {
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error(`❌ Slack notification failed for "${story.title}":`, response.status, errorText);
+      console.error(`❌ Slack notification failed for "${story.title}":`, {
+        status: response.status,
+        statusText: response.statusText,
+        error: errorText,
+        url: webhookUrl.substring(0, 50) + '...',
+        headers: Object.fromEntries(response.headers.entries())
+      });
+      
+      // Specific error handling
+      if (response.status === 404) {
+        console.error(`🚨 404 Error suggests webhook URL is invalid or webhook was deleted`);
+        console.error(`🔍 Double-check your webhook URL in Slack app settings`);
+      }
+      
       return {
         success: false,
         error: `HTTP ${response.status}: ${errorText}`,
         timestamp: new Date().toISOString(),
-        responseTime: endTime - startTime
+        responseTime: endTime - startTime,
+        debug: {
+          status: response.status,
+          statusText: response.statusText,
+          url: webhookUrl.substring(0, 50) + '...'
+        }
       };
     }
 
@@ -345,6 +372,66 @@ function simpleTextToADF(text) {
 // ============================================
 // API ROUTES - MUST BE DEFINED BEFORE STATIC FILES
 // ============================================
+
+// Test Slack webhook
+app.post('/api/test-slack', async (req, res) => {
+  try {
+    const { webhookUrl } = req.body;
+    
+    if (!webhookUrl) {
+      return res.status(400).json({ error: 'Webhook URL required' });
+    }
+    
+    console.log(`🔍 Testing Slack webhook: ${webhookUrl.substring(0, 50)}...`);
+    
+    const testPayload = {
+      text: "🤖 SkyNet AI Webhook Test",
+      blocks: [
+        {
+          "type": "section",
+          "text": {
+            "type": "mrkdwn",
+            "text": "✅ *SkyNet AI Connection Test*\n\nIf you see this message, your webhook is working correctly!"
+          }
+        }
+      ]
+    };
+    
+    const response = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(testPayload)
+    });
+    
+    const responseText = await response.text();
+    
+    if (!response.ok) {
+      console.error('Slack test failed:', response.status, responseText);
+      return res.status(response.status).json({
+        success: false,
+        error: responseText,
+        status: response.status,
+        statusText: response.statusText
+      });
+    }
+    
+    console.log('✅ Slack webhook test successful');
+    res.json({
+      success: true,
+      message: 'Slack webhook test successful! Check your Slack channel.',
+      status: response.status
+    });
+    
+  } catch (error) {
+    console.error('Slack test error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
 
 // Test route
 app.get('/api/health', (req, res) => {

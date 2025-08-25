@@ -1197,6 +1197,45 @@ function App() {
                       </a>
                     </div>
                     
+                    {slackConfig.webhookUrl && (
+                      <div style={{ marginBottom: '16px' }}>
+                        <button
+                          onClick={async () => {
+                            try {
+                              const response = await fetch('/api/test-slack', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ webhookUrl: slackConfig.webhookUrl })
+                              });
+                              const result = await response.json();
+                              
+                              if (result.success) {
+                                alert('✅ Webhook test successful! Check your Slack channel.');
+                              } else {
+                                alert(`❌ Webhook test failed: ${result.error}`);
+                                console.error('Webhook test details:', result);
+                              }
+                            } catch (error) {
+                              alert(`❌ Test error: ${error.message}`);
+                            }
+                          }}
+                          style={{
+                            width: '100%',
+                            padding: '8px 12px',
+                            background: 'linear-gradient(135deg, #22c55e, #16a34a)',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '6px',
+                            cursor: 'pointer',
+                            fontSize: '14px',
+                            fontWeight: '500'
+                          }}
+                        >
+                          🧪 Test Webhook Connection
+                        </button>
+                      </div>
+                    )}
+                    
                     <div>
                       <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', color: '#d1d5db', marginBottom: '4px' }}>
                         Slack Webhook URL
