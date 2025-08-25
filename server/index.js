@@ -57,6 +57,13 @@ async function sendSlackNotification(story, webhookUrl) {
         "type": "section",
         "text": {
           "type": "mrkdwn",
+          "text": `*User Story:*\n${story.userStory || 'Not specified'}`
+        }
+      },
+      {
+        "type": "section",
+        "text": {
+          "type": "mrkdwn",
           "text": `*Description:*\n${story.description}`
         }
       },
@@ -161,6 +168,7 @@ Return an array of stories in this exact JSON structure:
   "stories": [
     {
       "title": "Clear, actionable story title",
+      "userStory": "As a [user type], I want [goal/desire] so that [benefit/value]",
       "type": "Feature",
       "priority": "High", 
       "effort": "3 story points",
@@ -186,7 +194,17 @@ Extract EVERY distinct development item discussed. This includes:
 - API changes
 - Database modifications
 
-Each story should be actionable and specific. If multiple related items are discussed, create separate stories for each distinct deliverable.`;
+Each story should be actionable and specific. If multiple related items are discussed, create separate stories for each distinct deliverable.
+
+CRITICAL: For the userStory field, ALWAYS use the proper format:
+"As a [specific user role/persona], I want [specific capability/goal] so that [clear benefit/value]"
+
+Examples of good user stories:
+- "As a customer, I want to filter products by price range so that I can find items within my budget"
+- "As a developer, I want automated deployment pipelines so that I can release features faster and with fewer errors"
+- "As an admin, I want to view user activity logs so that I can monitor system usage and troubleshoot issues"
+
+Make sure to identify the actual user type from the meeting context (customer, admin, developer, manager, etc.) and specify concrete benefits.`;
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
@@ -547,6 +565,10 @@ app.post('/api/deploy-to-jira', async (req, res) => {
     }
 
     const descriptionText = [
+      '👤 User Story:',
+      story.userStory || 'Not specified',
+      '',
+      '📋 Description:',
       story.description,
       '',
       '🎯 Business Value:',

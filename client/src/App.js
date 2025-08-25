@@ -1480,6 +1480,13 @@ function App() {
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', marginBottom: '24px' }}>
                     <div>
                       <h4 style={{ margin: '0 0 8px 0', fontSize: '14px', fontWeight: '600', color: '#d1d5db' }}>
+                        👤 User Story
+                      </h4>
+                      <p style={{ fontSize: '14px', color: '#60a5fa', lineHeight: '1.5', marginBottom: '16px', fontStyle: 'italic', padding: '8px 12px', backgroundColor: '#1e3a8a22', borderRadius: '6px', border: '1px solid #1e3a8a44' }}>
+                        {story.userStory || 'User story not generated'}
+                      </p>
+                      
+                      <h4 style={{ margin: '0 0 8px 0', fontSize: '14px', fontWeight: '600', color: '#d1d5db' }}>
                         📋 Description
                       </h4>
                       <p style={{ fontSize: '14px', color: '#9ca3af', lineHeight: '1.5', marginBottom: '16px' }}>
