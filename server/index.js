@@ -451,6 +451,7 @@ app.get('/api/transcripts', async (req, res) => {
 app.post('/api/process-transcript', async (req, res) => {
   try {
     const { transcript, title, slackWebhook } = req.body;
+    const webhookUrl = slackWebhook || process.env.SLACK_WEBHOOK_URL;
     
     if (!process.env.OPENAI_API_KEY) {
       return res.status(400).json({ 
@@ -476,11 +477,11 @@ app.post('/api/process-transcript', async (req, res) => {
     }
 
     const slackResults = [];
-    if (slackWebhook && result.stories) {
+    if (webhookUrl && result.stories) {
       console.log(`📤 Sending ${result.stories.length} Slack notifications...`);
       
       for (const story of result.stories) {
-        const slackStatus = await sendSlackNotification(story, slackWebhook);
+        const slackStatus = await sendSlackNotification(story, webhookUrl);
         
         story.slackStatus = slackStatus;
         slackResults.push({
@@ -498,7 +499,7 @@ app.post('/api/process-transcript', async (req, res) => {
     const response = {
       ...result,
       slackSummary: {
-        enabled: !!slackWebhook,
+        enabled: !!webhookUrl,
         totalStories: result.stories?.length || 0,
         successfulNotifications: slackResults.filter(r => r.slackStatus.success).length,
         failedNotifications: slackResults.filter(r => r.slackStatus.success === false).length,
@@ -625,6 +626,7 @@ app.post('/api/deploy-to-jira', async (req, res) => {
 app.post('/api/auto-process-all', async (req, res) => {
   try {
     const { slackWebhook } = req.body;
+    const webhookUrl = slackWebhook || process.env.SLACK_WEBHOOK_URL;
     
     console.log('🤖 SkyNet starting auto-processing of all transcripts...');
     
@@ -681,9 +683,9 @@ app.post('/api/auto-process-all', async (req, res) => {
             
             const slackResults = [];
             
-            if (slackWebhook) {
+            if (webhookUrl) {
               for (const story of processResult.stories) {
-                const slackStatus = await sendSlackNotification(story, slackWebhook);
+                const slackStatus = await sendSlackNotification(story, webhookUrl);
                 if (slackStatus.success) {
                   totalSlackSuccess++;
                 } else {
@@ -714,7 +716,7 @@ app.post('/api/auto-process-all', async (req, res) => {
       transcriptsProcessed: processedCount,
       totalStories: totalStories,
       slackSummary: {
-        enabled: !!slackWebhook,
+        enabled: !!webhookUrl,
         successfulNotifications: totalSlackSuccess,
         failedNotifications: totalSlackFailed,
         totalNotifications: totalSlackSuccess + totalSlackFailed
