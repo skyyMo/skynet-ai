@@ -2,10 +2,10 @@
   "name": "skynet-ai",
   "version": "1.0.0",
   "description": "SkyNet AI - Meeting transcript to development stories processor",
-  "main": "server.js",
+  "main": "server/index.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "nodemon server.js",
+    "start": "node server/index.js",
+    "dev": "nodemon server/index.js",
     "build": "cd client && npm install && npm run build && cd .. && cp -r client/build ./build",
     "install-client": "cd client && npm install",
     "heroku-postbuild": "npm run build"
