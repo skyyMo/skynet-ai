@@ -1,4 +1,4 @@
-export default App;import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 
 function App() {
   const [transcripts, setTranscripts] = useState([]);
@@ -1665,3 +1665,5 @@ function App() {
     </div>
   );
 }
+
+export default App;
