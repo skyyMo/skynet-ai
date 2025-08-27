@@ -73,6 +73,13 @@ async function sendSlackNotification(story, webhookUrl) {
         "type": "section",
         "text": {
           "type": "mrkdwn",
+          "text": `*🎯 Problem/Opportunity:*\n${story.problemStatement || story.description}`
+        }
+      },
+      {
+        "type": "section",
+        "text": {
+          "type": "mrkdwn",
           "text": `*Description:*\n${story.description}`
         }
       },
@@ -186,52 +193,68 @@ async function autoProcessTranscript(transcript, title) {
       apiKey: process.env.OPENAI_API_KEY 
     });
 
-    const systemPrompt = `You are SkyNet AI, an autonomous system for extracting development stories from meeting transcripts.
+    const systemPrompt = `You are SkyNet AI, an autonomous system for extracting clear, actionable development stories from meeting transcripts.
 
-IMPORTANT: Return ONLY valid JSON - no markdown, no code blocks, no additional text.
+Output Rules (must follow exactly):
+- Return ONLY valid JSON
+- No markdown, no code blocks, no extra text
+- Use this exact schema:
 
-Return an array of stories in this exact JSON structure:
 {
   "stories": [
     {
       "title": "Clear, actionable story title",
       "userStory": "As a [user type], I want [goal/desire] so that [benefit/value]",
-      "type": "Feature",
-      "priority": "High", 
-      "effort": "3 story points",
+      "problemStatement": "What problem or opportunity this story addresses, written in plain language so the team understands why this matters",
+      "type": "Feature | Bug | Technical Debt | UX | Infrastructure | Performance | API | Database",
+      "priority": "High | Medium | Low",
+      "effort": "1-8 story points",
       "epic": "Epic category this belongs to",
-      "description": "Detailed description of what needs to be built",
+      "description": "Detailed description of what needs to be built or changed",
       "acceptanceCriteria": ["criterion 1", "criterion 2", "criterion 3"],
       "technicalRequirements": ["requirement 1", "requirement 2"],
       "businessValue": "Why this matters to the business",
       "risks": ["risk 1", "risk 2"],
       "confidence": 0.85,
-      "discussionContext": "Brief context from the meeting where this was discussed"
+      "discussionContext": "Brief excerpt or summary of where this was discussed in the meeting"
     }
   ]
 }
 
-Extract EVERY distinct development item discussed. This includes:
-- New features or enhancements
-- Bug fixes mentioned
-- Technical debt items
-- UI/UX improvements
-- Infrastructure changes
-- Performance optimizations
-- API changes
-- Database modifications
+Extraction Rules:
+- Identify EVERY distinct development item discussed
+- Create one story per deliverable, even if items are related
+- Include: New features/enhancements, Bug fixes, Technical debt, UI/UX improvements, Infrastructure/scaling work, Performance optimizations, API/database changes
 
-Each story should be actionable and specific. If multiple related items are discussed, create separate stories for each distinct deliverable.
+User Story Rules (CRITICAL):
+- Always use format: "As a [specific user role/persona], I want [capability/goal] so that [benefit/value]"
+- Choose realistic user role from context (customer, admin, developer, manager, etc.)
+- Be specific and concrete about the benefit
 
-CRITICAL: For the userStory field, ALWAYS use the proper format:
-"As a [specific user role/persona], I want [specific capability/goal] so that [clear benefit/value]"
+Problem/Opportunity Rules (IMPORTANT):
+The problemStatement must clearly explain:
+- What challenge the user/business is facing
+- Why solving it creates value (opportunity)
+- Any relevant context from the discussion
+- Keep it short but precise — 1-3 sentences
 
-Examples of good user stories:
-- "As a customer, I want to filter products by price range so that I can find items within my budget"
-- "As a developer, I want automated deployment pipelines so that I can release features faster and with fewer errors"
-- "As an admin, I want to view user activity logs so that I can monitor system usage and troubleshoot issues"
+Examples of Good Stories:
+1. "As a customer, I want to filter products by price range so that I can find items within my budget"
+   Problem Statement: "Customers currently have to scroll through hundreds of items, making it difficult to find affordable options."
 
-Make sure to identify the actual user type from the meeting context (customer, admin, developer, manager, etc.) and specify concrete benefits.`;
+2. "As a developer, I want automated deployment pipelines so that I can release features faster and with fewer errors"
+   Problem Statement: "Manual deployments are slow, error-prone, and block faster iteration."
+
+3. "As an admin, I want to view user activity logs so that I can monitor system usage and troubleshoot issues"
+   Problem Statement: "Admins lack visibility into user actions, making support and security investigations inefficient."
+
+Quality Guidelines:
+- Title: Action-oriented, starts with verb (Add, Fix, Implement, Create, Update, Refactor)
+- Effort: Use Fibonacci sequence (1, 2, 3, 5, 8) for story points
+- Priority: Based on business impact and urgency discussed in meeting
+- Acceptance Criteria: Specific, testable conditions for story completion
+- Technical Requirements: Implementation details, dependencies, constraints
+- Risks: Technical, business, or timeline risks mentioned or implied`;
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
@@ -661,10 +684,13 @@ app.post('/api/deploy-to-jira', async (req, res) => {
       '👤 User Story:',
       story.userStory || 'Not specified',
       '',
+      '🎯 Problem/Opportunity:',
+      story.problemStatement || 'Not specified',
+      '',
       '📋 Description:',
       story.description,
       '',
-      '🎯 Business Value:',
+      '💰 Business Value:',
       story.businessValue,
       '',
       '✅ Acceptance Criteria:',
@@ -734,6 +760,194 @@ app.post('/api/deploy-to-jira', async (req, res) => {
     console.error('🚨 JIRA deployment failed:', error.message);
     res.status(500).json({ 
       error: error.message
+    });
+  }
+});
+
+// Webhook endpoint for Notion automation - process new transcript immediately
+app.post('/api/webhook/notion-transcript', async (req, res) => {
+  try {
+    console.log('🔔 Notion webhook received - new transcript detected');
+    
+    // Get the page ID from Notion webhook if provided
+    const { pageId } = req.body;
+    
+    if (!process.env.OPENAI_API_KEY) {
+      return res.status(400).json({ 
+        error: 'OpenAI API key not configured' 
+      });
+    }
+
+    if (!process.env.SLACK_WEBHOOK_URL) {
+      console.warn('⚠️ Slack webhook not configured - stories will be generated but not sent to Slack');
+    }
+
+    let processedCount = 0;
+    let storiesGenerated = [];
+    
+    // If specific page ID provided, process just that transcript
+    if (pageId) {
+      // Check if already processed
+      if (processedTranscriptIds.has(pageId)) {
+        console.log(`⏭️ Transcript ${pageId} already processed, skipping`);
+        return res.json({
+          success: true,
+          message: 'Transcript already processed',
+          alreadyProcessed: true
+        });
+      }
+
+      try {
+        // Get the specific page
+        const page = await notion.pages.retrieve({ page_id: pageId });
+        const properties = page.properties;
+        const title = properties.Name?.title?.[0]?.plain_text || 'Untitled Meeting';
+        
+        console.log(`📄 Processing specific transcript: ${title}`);
+        
+        // Get page content
+        const pageContent = await notion.blocks.children.list({
+          block_id: pageId,
+        });
+        
+        let content = '';
+        pageContent.results.forEach(block => {
+          if (block.type === 'paragraph' && block.paragraph?.rich_text) {
+            const text = block.paragraph.rich_text
+              .map(t => t.plain_text)
+              .join('');
+            content += text + '\n';
+          }
+          if (block.type === 'heading_1' && block.heading_1?.rich_text) {
+            content += block.heading_1.rich_text
+              .map(t => t.plain_text)
+              .join('') + '\n';
+          }
+          if (block.type === 'heading_2' && block.heading_2?.rich_text) {
+            content += block.heading_2.rich_text
+              .map(t => t.plain_text)
+              .join('') + '\n';
+          }
+          if (block.type === 'heading_3' && block.heading_3?.rich_text) {
+            content += block.heading_3.rich_text
+              .map(t => t.plain_text)
+              .join('') + '\n';
+          }
+        });
+        
+        const wordCount = content.trim().split(' ').length;
+        
+        if (wordCount > 50) {
+          const processResult = await autoProcessTranscript(content.trim(), title);
+          
+          if (processResult && processResult.stories && processResult.stories.length > 0) {
+            processedCount++;
+            storiesGenerated = processResult.stories;
+            
+            // Mark as processed
+            processedTranscriptIds.add(pageId);
+            
+            // Send Slack notifications
+            if (process.env.SLACK_WEBHOOK_URL) {
+              console.log(`📤 Sending ${processResult.stories.length} stories to Slack...`);
+              for (const story of processResult.stories) {
+                await sendSlackNotification(story, process.env.SLACK_WEBHOOK_URL);
+                await new Promise(resolve => setTimeout(resolve, 300));
+              }
+            }
+            
+            console.log(`✅ Webhook processing complete: ${title} (${processResult.stories.length} stories)`);
+          }
+        } else {
+          console.log(`⚠️ Transcript too short: ${wordCount} words`);
+        }
+      } catch (error) {
+        console.error(`❌ Error processing transcript ${pageId}:`, error.message);
+        return res.status(500).json({
+          error: 'Failed to process transcript',
+          details: error.message
+        });
+      }
+    } else {
+      // No specific page ID - process all new transcripts
+      console.log('📊 Processing all new transcripts...');
+      
+      const response = await notion.databases.query({
+        database_id: process.env.NOTION_DATABASE_ID,
+        sorts: [
+          {
+            property: 'Created time',
+            direction: 'descending'
+          }
+        ],
+        page_size: 10 // Check last 10 transcripts
+      });
+      
+      for (const page of response.results) {
+        if (processedTranscriptIds.has(page.id)) {
+          continue;
+        }
+        
+        const properties = page.properties;
+        const title = properties.Name?.title?.[0]?.plain_text || 'Untitled Meeting';
+        
+        try {
+          const pageContent = await notion.blocks.children.list({
+            block_id: page.id,
+          });
+          
+          let content = '';
+          pageContent.results.forEach(block => {
+            if (block.type === 'paragraph' && block.paragraph?.rich_text) {
+              const text = block.paragraph.rich_text
+                .map(t => t.plain_text)
+                .join('');
+              content += text + '\n';
+            }
+          });
+          
+          const wordCount = content.trim().split(' ').length;
+          
+          if (wordCount > 50) {
+            const processResult = await autoProcessTranscript(content.trim(), title);
+            
+            if (processResult && processResult.stories && processResult.stories.length > 0) {
+              processedCount++;
+              storiesGenerated = [...storiesGenerated, ...processResult.stories];
+              
+              // Mark as processed
+              processedTranscriptIds.add(page.id);
+              
+              // Send Slack notifications
+              if (process.env.SLACK_WEBHOOK_URL) {
+                for (const story of processResult.stories) {
+                  await sendSlackNotification(story, process.env.SLACK_WEBHOOK_URL);
+                  await new Promise(resolve => setTimeout(resolve, 300));
+                }
+              }
+              
+              console.log(`✅ Processed: ${title} (${processResult.stories.length} stories)`);
+            }
+          }
+        } catch (error) {
+          console.error(`❌ Error processing ${title}:`, error.message);
+        }
+      }
+    }
+    
+    res.json({
+      success: true,
+      message: `Webhook processing complete`,
+      transcriptsProcessed: processedCount,
+      storiesGenerated: storiesGenerated.length,
+      stories: storiesGenerated
+    });
+    
+  } catch (error) {
+    console.error('❌ Webhook processing error:', error);
+    res.status(500).json({
+      error: 'Webhook processing failed',
+      details: error.message
     });
   }
 });
@@ -871,10 +1085,11 @@ if (process.env.NODE_ENV === 'production') {
   });
 }
 
-// Auto-processing cron job - runs every 15 minutes
+// Auto-processing cron job - runs every 2 minutes for faster detection
 if (process.env.ENABLE_AUTO_PROCESSING === 'true') {
-  cron.schedule('*/15 * * * *', async () => {
-    console.log('🤖 SkyNet auto-processing cron job started...');
+  // More frequent checking - every 2 minutes
+  cron.schedule('*/2 * * * *', async () => {
+    console.log('🤖 SkyNet auto-processing scan started...');
     
     try {
       if (!process.env.OPENAI_API_KEY) {
@@ -971,7 +1186,27 @@ if (process.env.ENABLE_AUTO_PROCESSING === 'true') {
     }
   });
   
-  console.log('🕒 SkyNet auto-processing enabled: runs every 15 minutes');
+  console.log('🕒 SkyNet auto-processing enabled: scanning every 2 minutes');
+  
+  // Initial check on startup for any unprocessed transcripts
+  setTimeout(async () => {
+    console.log('🚀 Running initial scan for unprocessed transcripts...');
+    try {
+      const response = await fetch(`http://localhost:${port}/api/webhook/notion-transcript`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
+      });
+      const result = await response.json();
+      if (result.transcriptsProcessed > 0) {
+        console.log(`✅ Initial scan complete: ${result.transcriptsProcessed} transcripts processed, ${result.storiesGenerated} stories generated`);
+      } else {
+        console.log('✅ Initial scan complete: All transcripts already processed');
+      }
+    } catch (error) {
+      console.error('❌ Initial scan error:', error.message);
+    }
+  }, 5000); // Wait 5 seconds after startup
 } else {
   console.log('⏸️ Auto-processing disabled. Set ENABLE_AUTO_PROCESSING=true to enable.');
 }
@@ -990,4 +1225,9 @@ app.listen(port, async () => {
   });
   
   console.log('🎯 SkyNet is now fully operational!');
+  
+  if (process.env.ENABLE_AUTO_PROCESSING === 'true') {
+    console.log('📡 Webhook endpoint ready at: /api/webhook/notion-transcript');
+    console.log('🔄 Auto-processing will scan every 2 minutes for new transcripts');
+  }
 });

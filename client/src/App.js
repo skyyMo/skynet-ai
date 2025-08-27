@@ -1220,6 +1220,17 @@ function App() {
                         {story.userStory || 'User story not generated'}
                       </p>
                       
+                      {story.problemStatement && (
+                        <>
+                          <h4 style={{ margin: '0 0 8px 0', fontSize: '14px', fontWeight: '600', color: '#d1d5db' }}>
+                            🎯 Problem/Opportunity
+                          </h4>
+                          <p style={{ fontSize: '14px', color: '#fbbf24', lineHeight: '1.5', marginBottom: '16px', padding: '8px 12px', backgroundColor: '#78350f22', borderRadius: '6px', border: '1px solid #78350f44' }}>
+                            {story.problemStatement}
+                          </p>
+                        </>
+                      )}
+                      
                       <h4 style={{ margin: '0 0 8px 0', fontSize: '14px', fontWeight: '600', color: '#d1d5db' }}>
                         📋 Description
                       </h4>
