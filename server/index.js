@@ -601,6 +601,12 @@ app.post('/api/process-transcript', async (req, res) => {
       
       console.log(`✅ Slack notifications completed for: ${title}`);
     }
+    
+    // Mark as processed if we have a transcript ID (from req.body)
+    if (req.body.transcriptId) {
+      processedTranscriptIds.add(req.body.transcriptId);
+      console.log(`📝 Marked transcript ${req.body.transcriptId} as processed`);
+    }
 
     const response = {
       ...result,
@@ -784,12 +790,21 @@ app.post('/api/auto-process-all', async (req, res) => {
         
         const wordCount = content.trim().split(' ').length;
         
+        // Skip if already processed
+        if (processedTranscriptIds.has(page.id)) {
+          console.log(`⏭️ Skipping already processed transcript: ${title}`);
+          continue;
+        }
+        
         if (wordCount > 50) {
           const processResult = await autoProcessTranscript(content.trim(), title);
           
           if (processResult && processResult.stories && processResult.stories.length > 0) {
             processedCount++;
             totalStories += processResult.stories.length;
+            
+            // Mark transcript as processed
+            processedTranscriptIds.add(page.id);
             
             const slackResults = [];
             
@@ -856,6 +871,111 @@ if (process.env.NODE_ENV === 'production') {
   });
 }
 
+// Auto-processing cron job - runs every 15 minutes
+if (process.env.ENABLE_AUTO_PROCESSING === 'true') {
+  cron.schedule('*/15 * * * *', async () => {
+    console.log('🤖 SkyNet auto-processing cron job started...');
+    
+    try {
+      if (!process.env.OPENAI_API_KEY) {
+        console.log('⚠️ Auto-processing skipped: OpenAI API key not configured');
+        return;
+      }
+
+      const response = await notion.databases.query({
+        database_id: process.env.NOTION_DATABASE_ID,
+        sorts: [
+          {
+            property: 'Created time',
+            direction: 'descending'
+          }
+        ],
+        page_size: 20
+      });
+      
+      let newProcessedCount = 0;
+      let totalSlackSuccess = 0;
+      let totalSlackFailed = 0;
+      
+      for (const page of response.results) {
+        const properties = page.properties;
+        const title = properties.Name?.title?.[0]?.plain_text || 'Untitled Meeting';
+        
+        // Skip if already processed
+        if (processedTranscriptIds.has(page.id)) {
+          continue;
+        }
+        
+        try {
+          const pageContent = await notion.blocks.children.list({
+            block_id: page.id,
+          });
+          
+          let content = '';
+          pageContent.results.forEach(block => {
+            if (block.type === 'paragraph' && block.paragraph?.rich_text) {
+              const text = block.paragraph.rich_text
+                .map(t => t.plain_text)
+                .join('');
+              content += text + '\n';
+            }
+          });
+          
+          const wordCount = content.trim().split(' ').length;
+          
+          if (wordCount > 50) {
+            const processResult = await autoProcessTranscript(content.trim(), title);
+            
+            if (processResult && processResult.stories && processResult.stories.length > 0) {
+              newProcessedCount++;
+              
+              // Mark transcript as processed
+              processedTranscriptIds.add(page.id);
+              
+              // Send Slack notifications if webhook is configured
+              if (process.env.SLACK_WEBHOOK_URL) {
+                for (const story of processResult.stories) {
+                  const slackStatus = await sendSlackNotification(story, process.env.SLACK_WEBHOOK_URL);
+                  if (slackStatus.success) {
+                    totalSlackSuccess++;
+                  } else {
+                    totalSlackFailed++;
+                  }
+                  await new Promise(resolve => setTimeout(resolve, 300));
+                }
+              }
+              
+              console.log(`✅ Auto-processed: ${title} (${processResult.stories.length} stories)`);
+              
+              // Small delay between transcripts to avoid rate limits
+              await new Promise(resolve => setTimeout(resolve, 2000));
+            }
+          }
+          
+        } catch (error) {
+          console.error(`❌ Auto-processing error for ${title}:`, error.message);
+        }
+      }
+      
+      if (newProcessedCount > 0) {
+        console.log(`🎯 SkyNet auto-processing complete: ${newProcessedCount} new transcripts processed`);
+        if (process.env.SLACK_WEBHOOK_URL) {
+          console.log(`📱 Slack notifications: ${totalSlackSuccess} sent, ${totalSlackFailed} failed`);
+        }
+      } else {
+        console.log('⏭️ No new transcripts found for auto-processing');
+      }
+      
+    } catch (error) {
+      console.error('❌ Auto-processing cron job error:', error.message);
+    }
+  });
+  
+  console.log('🕒 SkyNet auto-processing enabled: runs every 15 minutes');
+} else {
+  console.log('⏸️ Auto-processing disabled. Set ENABLE_AUTO_PROCESSING=true to enable.');
+}
+
 // Start server
 app.listen(port, async () => {
   console.log(`🤖 SkyNet AI server operational on port ${port}`);
@@ -865,7 +985,8 @@ app.listen(port, async () => {
     hasNotionToken: !!process.env.NOTION_TOKEN,
     hasNotionDB: !!process.env.NOTION_DATABASE_ID,
     hasOpenAI: !!process.env.OPENAI_API_KEY,
-    hasSlackWebhook: !!process.env.SLACK_WEBHOOK_URL
+    hasSlackWebhook: !!process.env.SLACK_WEBHOOK_URL,
+    autoProcessing: process.env.ENABLE_AUTO_PROCESSING === 'true'
   });
   
   console.log('🎯 SkyNet is now fully operational!');
