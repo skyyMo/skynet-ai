@@ -180,6 +180,82 @@ const path = require('path');
 let openai = null;
 let productContext = '';
 
+// Persistent tracking for processed transcripts
+let processedTranscriptsData = {
+  processedIds: [],
+  lastUpdated: '',
+  cutoffDate: ''
+};
+
+// Load and save processed transcripts data
+function loadProcessedTranscripts() {
+  try {
+    const dataPath = path.join(__dirname, '..', 'processed_transcripts.json');
+    if (fs.existsSync(dataPath)) {
+      const data = fs.readFileSync(dataPath, 'utf8');
+      processedTranscriptsData = JSON.parse(data);
+      
+      // Set cutoff date if not exists (to prevent processing old transcripts)
+      if (!processedTranscriptsData.cutoffDate) {
+        processedTranscriptsData.cutoffDate = new Date().toISOString();
+        saveProcessedTranscripts();
+        console.log(`✅ Set transcript cutoff date to: ${processedTranscriptsData.cutoffDate}`);
+        console.log('📝 Only transcripts created after this date will be processed');
+      }
+      
+      console.log(`✅ Loaded ${processedTranscriptsData.processedIds.length} processed transcript IDs`);
+      return true;
+    } else {
+      // Initialize with current date as cutoff
+      processedTranscriptsData.cutoffDate = new Date().toISOString();
+      saveProcessedTranscripts();
+      console.log(`✅ Initialized processed transcripts tracking with cutoff: ${processedTranscriptsData.cutoffDate}`);
+      return true;
+    }
+  } catch (error) {
+    console.error('❌ Error loading processed transcripts:', error.message);
+    return false;
+  }
+}
+
+function saveProcessedTranscripts() {
+  try {
+    const dataPath = path.join(__dirname, '..', 'processed_transcripts.json');
+    processedTranscriptsData.lastUpdated = new Date().toISOString();
+    fs.writeFileSync(dataPath, JSON.stringify(processedTranscriptsData, null, 2));
+    return true;
+  } catch (error) {
+    console.error('❌ Error saving processed transcripts:', error.message);
+    return false;
+  }
+}
+
+function isTranscriptNew(page) {
+  // Check if already processed
+  if (processedTranscriptsData.processedIds.includes(page.id)) {
+    return false;
+  }
+  
+  // Check if created after cutoff date
+  const pageCreated = new Date(page.created_time);
+  const cutoffDate = new Date(processedTranscriptsData.cutoffDate);
+  
+  if (pageCreated <= cutoffDate) {
+    console.log(`⏭️ Skipping old transcript (${pageCreated.toISOString()}) - before cutoff (${cutoffDate.toISOString()})`);
+    return false;
+  }
+  
+  return true;
+}
+
+function markTranscriptProcessed(pageId) {
+  if (!processedTranscriptsData.processedIds.includes(pageId)) {
+    processedTranscriptsData.processedIds.push(pageId);
+    saveProcessedTranscripts();
+    console.log(`📝 Marked transcript ${pageId} as processed`);
+  }
+}
+
 // Load product context from file
 function loadProductContext() {
   try {
@@ -847,19 +923,20 @@ app.post('/api/webhook/notion-transcript', async (req, res) => {
     
     // If specific page ID provided, process just that transcript
     if (pageId) {
-      // Check if already processed
-      if (processedTranscriptIds.has(pageId)) {
-        console.log(`⏭️ Transcript ${pageId} already processed, skipping`);
-        return res.json({
-          success: true,
-          message: 'Transcript already processed',
-          alreadyProcessed: true
-        });
-      }
-
       try {
-        // Get the specific page
+        // Get the page details first to check if it's new
         const page = await notion.pages.retrieve({ page_id: pageId });
+        
+        // Check if it's a new transcript
+        if (!isTranscriptNew(page)) {
+          console.log(`⏭️ Transcript ${pageId} not new (already processed or before cutoff), skipping`);
+          return res.json({
+            success: true,
+            message: 'Transcript not new - already processed or created before cutoff date',
+            alreadyProcessed: true
+          });
+        }
+
         const properties = page.properties;
         const title = properties.Name?.title?.[0]?.plain_text || 'Untitled Meeting';
         
@@ -905,7 +982,7 @@ app.post('/api/webhook/notion-transcript', async (req, res) => {
             storiesGenerated = processResult.stories;
             
             // Mark as processed
-            processedTranscriptIds.add(pageId);
+            markTranscriptProcessed(pageId);
             
             // Send Slack notifications
             if (process.env.SLACK_WEBHOOK_URL) {
@@ -944,7 +1021,8 @@ app.post('/api/webhook/notion-transcript', async (req, res) => {
       });
       
       for (const page of response.results) {
-        if (processedTranscriptIds.has(page.id)) {
+        // Skip if not a new transcript
+        if (!isTranscriptNew(page)) {
           continue;
         }
         
@@ -976,7 +1054,7 @@ app.post('/api/webhook/notion-transcript', async (req, res) => {
               storiesGenerated = [...storiesGenerated, ...processResult.stories];
               
               // Mark as processed
-              processedTranscriptIds.add(page.id);
+              markTranscriptProcessed(page.id);
               
               // Send Slack notifications
               if (process.env.SLACK_WEBHOOK_URL) {
@@ -1064,9 +1142,8 @@ app.post('/api/auto-process-all', async (req, res) => {
         
         const wordCount = content.trim().split(' ').length;
         
-        // Skip if already processed
-        if (processedTranscriptIds.has(page.id)) {
-          console.log(`⏭️ Skipping already processed transcript: ${title}`);
+        // Skip if not a new transcript (already processed or before cutoff date)
+        if (!isTranscriptNew(page)) {
           continue;
         }
         
@@ -1078,7 +1155,7 @@ app.post('/api/auto-process-all', async (req, res) => {
             totalStories += processResult.stories.length;
             
             // Mark transcript as processed
-            processedTranscriptIds.add(page.id);
+            markTranscriptProcessed(page.id);
             
             const slackResults = [];
             
@@ -1173,13 +1250,13 @@ if (process.env.ENABLE_AUTO_PROCESSING === 'true') {
       let totalSlackFailed = 0;
       
       for (const page of response.results) {
-        const properties = page.properties;
-        const title = properties.Name?.title?.[0]?.plain_text || 'Untitled Meeting';
-        
-        // Skip if already processed
-        if (processedTranscriptIds.has(page.id)) {
+        // Skip if not a new transcript (already processed or before cutoff date)
+        if (!isTranscriptNew(page)) {
           continue;
         }
+        
+        const properties = page.properties;
+        const title = properties.Name?.title?.[0]?.plain_text || 'Untitled Meeting';
         
         try {
           const pageContent = await notion.blocks.children.list({
@@ -1205,7 +1282,7 @@ if (process.env.ENABLE_AUTO_PROCESSING === 'true') {
               newProcessedCount++;
               
               // Mark transcript as processed
-              processedTranscriptIds.add(page.id);
+              markTranscriptProcessed(page.id);
               
               // Send Slack notifications if webhook is configured
               if (process.env.SLACK_WEBHOOK_URL) {
@@ -1284,11 +1361,12 @@ app.listen(port, async () => {
     autoProcessing: process.env.ENABLE_AUTO_PROCESSING === 'true'
   });
   
-  // Initialize OpenAI and load context on startup
+  // Initialize OpenAI, load context, and processed transcripts on startup
   if (process.env.OPENAI_API_KEY) {
     console.log('🧠 Initializing OpenAI for direct completions...');
     const openaiReady = initializeOpenAI();
     const contextLoaded = loadProductContext();
+    const processedLoaded = loadProcessedTranscripts();
     
     if (openaiReady) {
       console.log('✅ OpenAI ready for story extraction');
@@ -1300,6 +1378,10 @@ app.listen(port, async () => {
       console.log('✅ Product context loaded - stories will be tailored to your business');
     } else {
       console.log('💡 Tip: Create context/PRODUCT_CONTEXT.md with your product info for better stories');
+    }
+    
+    if (processedLoaded) {
+      console.log('✅ Processed transcripts tracking initialized - only new transcripts will be processed');
     }
   }
   
