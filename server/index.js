@@ -173,27 +173,40 @@ async function sendSlackNotification(story, webhookUrl) {
   }
 }
 
-// Helper function to automatically process a transcript
-async function autoProcessTranscript(transcript, title) {
+// Initialize OpenAI and Assistant
+const OpenAI = require('openai');
+let openai = null;
+let assistantId = null;
+
+// Initialize OpenAI and create/retrieve assistant
+async function initializeAssistant() {
+  if (!process.env.OPENAI_API_KEY) {
+    console.error('❌ OpenAI API key not configured');
+    return false;
+  }
+
+  openai = new OpenAI({ 
+    apiKey: process.env.OPENAI_API_KEY 
+  });
+
   try {
-    console.log(`🤖 SkyNet auto-processing transcript: ${title}`);
-
-    if (!process.env.OPENAI_API_KEY) {
-      console.error('❌ OpenAI API key not configured for auto-processing');
-      return null;
+    // If assistant ID is provided in env, use it
+    if (process.env.OPENAI_ASSISTANT_ID) {
+      assistantId = process.env.OPENAI_ASSISTANT_ID;
+      console.log(`✅ Using existing assistant: ${assistantId}`);
+      
+      // Verify assistant exists
+      const assistant = await openai.beta.assistants.retrieve(assistantId);
+      console.log(`📋 Assistant name: ${assistant.name}`);
+      return true;
     }
 
-    if (!transcript || transcript.length < 100) {
-      console.log(`⚠️ Skipping auto-processing: transcript too short (${transcript.length} chars)`);
-      return null;
-    }
-
-    const OpenAI = require('openai');
-    const openai = new OpenAI({ 
-      apiKey: process.env.OPENAI_API_KEY 
-    });
-
-    const systemPrompt = `You are SkyNet AI, an autonomous system for extracting clear, actionable development stories from meeting transcripts.
+    // Otherwise, create a new assistant
+    console.log('🔧 Creating new SkyNet Story Assistant...');
+    
+    const assistant = await openai.beta.assistants.create({
+      name: "SkyNet Story Extractor",
+      instructions: process.env.ASSISTANT_INSTRUCTIONS || `You are SkyNet AI, an autonomous system for extracting clear, actionable development stories from meeting transcripts.
 
 Output Rules (must follow exactly):
 - Return ONLY valid JSON
@@ -238,74 +251,147 @@ The problemStatement must clearly explain:
 - Any relevant context from the discussion
 - Keep it short but precise — 1-3 sentences
 
-Examples of Good Stories:
-1. "As a customer, I want to filter products by price range so that I can find items within my budget"
-   Problem Statement: "Customers currently have to scroll through hundreds of items, making it difficult to find affordable options."
-
-2. "As a developer, I want automated deployment pipelines so that I can release features faster and with fewer errors"
-   Problem Statement: "Manual deployments are slow, error-prone, and block faster iteration."
-
-3. "As an admin, I want to view user activity logs so that I can monitor system usage and troubleshoot issues"
-   Problem Statement: "Admins lack visibility into user actions, making support and security investigations inefficient."
-
 Quality Guidelines:
 - Title: Action-oriented, starts with verb (Add, Fix, Implement, Create, Update, Refactor)
 - Effort: Use Fibonacci sequence (1, 2, 3, 5, 8) for story points
 - Priority: Based on business impact and urgency discussed in meeting
 - Acceptance Criteria: Specific, testable conditions for story completion
 - Technical Requirements: Implementation details, dependencies, constraints
-- Risks: Technical, business, or timeline risks mentioned or implied`;
-
-    const completion = await openai.chat.completions.create({
+- Risks: Technical, business, or timeline risks mentioned or implied`,
       model: "gpt-4o-mini",
-      messages: [
-        {
-          role: "system",
-          content: systemPrompt
-        },
-        {
-          role: "user",
-          content: `Meeting: ${title}\n\nTranscript: ${transcript}`
-        }
-      ],
-      temperature: 0.2,
-      max_tokens: 3000
+      tools: []
     });
+
+    assistantId = assistant.id;
+    console.log(`✅ Created new assistant: ${assistantId}`);
+    console.log(`💡 Add OPENAI_ASSISTANT_ID=${assistantId} to your .env file to reuse this assistant`);
     
-    const rawResponse = completion.choices[0].message.content;
-    
-    let result;
+    return true;
+  } catch (error) {
+    console.error('❌ Failed to initialize assistant:', error.message);
+    return false;
+  }
+}
+
+// Helper function to automatically process a transcript
+async function autoProcessTranscript(transcript, title) {
+  try {
+    console.log(`🤖 SkyNet auto-processing transcript: ${title}`);
+
+    if (!openai || !assistantId) {
+      const initialized = await initializeAssistant();
+      if (!initialized) {
+        console.error('❌ Failed to initialize OpenAI Assistant');
+        return null;
+      }
+    }
+
+    if (!transcript || transcript.length < 100) {
+      console.log(`⚠️ Skipping auto-processing: transcript too short (${transcript.length} chars)`);
+      return null;
+    }
+
     try {
-      // Clean the response - remove markdown code blocks
-      let cleanResponse = rawResponse.trim();
+      // Create a new thread for this conversation
+      const thread = await openai.beta.threads.create();
       
-      if (cleanResponse.startsWith('```json')) {
-        cleanResponse = cleanResponse.replace(/^```json\s*/, '').replace(/\s*```$/, '');
-      } else if (cleanResponse.startsWith('```')) {
-        cleanResponse = cleanResponse.replace(/^```\s*/, '').replace(/\s*```$/, '');
+      // Add the transcript as a message to the thread
+      await openai.beta.threads.messages.create(thread.id, {
+        role: "user",
+        content: `Extract development stories from this meeting transcript.
+
+Meeting: ${title}
+
+Transcript: ${transcript}
+
+Remember to return ONLY valid JSON with the stories array structure, no markdown or extra text.`
+      });
+      
+      // Run the assistant
+      const run = await openai.beta.threads.runs.create(thread.id, {
+        assistant_id: assistantId
+      });
+      
+      // Wait for the run to complete
+      let runStatus = await openai.beta.threads.runs.retrieve(thread.id, run.id);
+      let attempts = 0;
+      const maxAttempts = 30; // 30 seconds timeout
+      
+      while (runStatus.status !== 'completed' && attempts < maxAttempts) {
+        if (runStatus.status === 'failed' || runStatus.status === 'cancelled' || runStatus.status === 'expired') {
+          console.error(`❌ Assistant run failed with status: ${runStatus.status}`);
+          return null;
+        }
+        
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        runStatus = await openai.beta.threads.runs.retrieve(thread.id, run.id);
+        attempts++;
       }
       
-      result = JSON.parse(cleanResponse);
-      
-      // Add metadata to each story
-      if (result.stories && Array.isArray(result.stories)) {
-        result.stories = result.stories.map((story, index) => ({
-          ...story,
-          id: `story-${Date.now()}-${index}`,
-          sourceTranscript: title,
-          sourceTimestamp: new Date().toISOString().split('T')[0],
-          autoProcessed: true
-        }));
-        
-        console.log(`🎯 SkyNet auto-generated ${result.stories.length} stories from: ${title}`);
-        return result;
-      } else {
-        console.log(`⚠️ No stories found in transcript: ${title}`);
+      if (runStatus.status !== 'completed') {
+        console.error(`❌ Assistant run timed out with status: ${runStatus.status}`);
         return null;
       }
       
-    } catch (parseError) {
-      console.error('❌ Auto-processing failed - invalid AI response:', parseError.message);
+      // Get the messages
+      const messages = await openai.beta.threads.messages.list(thread.id);
+      
+      // Get the assistant's response (first message since we list in reverse chronological order)
+      const assistantMessage = messages.data[0];
+      
+      if (!assistantMessage || assistantMessage.role !== 'assistant') {
+        console.error('❌ No assistant response found');
+        return null;
+      }
+      
+      // Extract the text content
+      const rawResponse = assistantMessage.content[0].text.value;
+      
+      // Clean up the thread
+      try {
+        await openai.beta.threads.del(thread.id);
+      } catch (e) {
+        // Thread deletion might not be supported yet, ignore error
+      }
+      
+      let result;
+      try {
+        // Clean the response - remove markdown code blocks
+        let cleanResponse = rawResponse.trim();
+        
+        if (cleanResponse.startsWith('```json')) {
+          cleanResponse = cleanResponse.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+        } else if (cleanResponse.startsWith('```')) {
+          cleanResponse = cleanResponse.replace(/^```\s*/, '').replace(/\s*```$/, '');
+        }
+        
+        result = JSON.parse(cleanResponse);
+        
+        // Add metadata to each story
+        if (result.stories && Array.isArray(result.stories)) {
+          result.stories = result.stories.map((story, index) => ({
+            ...story,
+            id: `story-${Date.now()}-${index}`,
+            sourceTranscript: title,
+            sourceTimestamp: new Date().toISOString().split('T')[0],
+            autoProcessed: true
+          }));
+          
+          console.log(`🎯 SkyNet auto-generated ${result.stories.length} stories from: ${title}`);
+          return result;
+        } else {
+          console.log(`⚠️ No stories found in transcript: ${title}`);
+          return null;
+        }
+        
+      } catch (parseError) {
+        console.error('❌ Auto-processing failed - invalid AI response:', parseError.message);
+        console.error('Raw response:', rawResponse);
+        return null;
+      }
+      
+    } catch (error) {
+      console.error('❌ Assistant API error:', error.message);
       return null;
     }
     
@@ -1223,6 +1309,17 @@ app.listen(port, async () => {
     hasSlackWebhook: !!process.env.SLACK_WEBHOOK_URL,
     autoProcessing: process.env.ENABLE_AUTO_PROCESSING === 'true'
   });
+  
+  // Initialize OpenAI Assistant on startup
+  if (process.env.OPENAI_API_KEY) {
+    console.log('🧠 Initializing OpenAI Assistant...');
+    const assistantReady = await initializeAssistant();
+    if (assistantReady) {
+      console.log('✅ OpenAI Assistant ready for story extraction');
+    } else {
+      console.log('⚠️ OpenAI Assistant initialization failed - will retry on first use');
+    }
+  }
   
   console.log('🎯 SkyNet is now fully operational!');
   
