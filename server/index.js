@@ -195,9 +195,49 @@ async function initializeAssistant() {
       assistantId = process.env.OPENAI_ASSISTANT_ID;
       console.log(`✅ Using existing assistant: ${assistantId}`);
       
-      // Verify assistant exists
+      // Verify assistant exists and update instructions to ensure JSON format
       const assistant = await openai.beta.assistants.retrieve(assistantId);
       console.log(`📋 Assistant name: ${assistant.name}`);
+      
+      // Update assistant with stricter JSON instructions
+      await openai.beta.assistants.update(assistantId, {
+        instructions: `You are SkyNet AI, an autonomous system for extracting clear, actionable development stories from meeting transcripts.
+
+CRITICAL INSTRUCTION: You MUST respond with ONLY valid JSON. No other text, no markdown, no code blocks, no explanations before or after the JSON. Start your response with { and end with }.
+
+Required JSON structure:
+{
+  "stories": [
+    {
+      "title": "Clear, actionable story title starting with a verb",
+      "userStory": "As a [specific user role], I want [specific capability] so that [clear benefit]",
+      "problemStatement": "What problem or opportunity this addresses in 1-3 sentences",
+      "type": "Feature | Bug | Technical Debt | UX | Infrastructure | Performance | API | Database",
+      "priority": "High | Medium | Low",
+      "effort": "1 | 2 | 3 | 5 | 8 story points",
+      "epic": "Epic category this belongs to",
+      "description": "Detailed description of what needs to be built or changed",
+      "acceptanceCriteria": ["specific testable condition 1", "specific testable condition 2"],
+      "technicalRequirements": ["implementation detail 1", "implementation detail 2"],
+      "businessValue": "Why this matters to the business",
+      "risks": ["potential risk 1", "potential risk 2"],
+      "confidence": 0.0-1.0,
+      "discussionContext": "Brief excerpt from meeting where this was discussed"
+    }
+  ]
+}
+
+Extraction Rules:
+- Extract EVERY distinct development item discussed
+- Create separate stories for each deliverable
+- Use realistic user personas based on your product knowledge
+- Make titles action-oriented (Add, Fix, Implement, Create, Update)
+- Use Fibonacci sequence for effort (1, 2, 3, 5, 8)
+- Base priority on business impact discussed in meeting
+
+REMEMBER: Respond with ONLY the JSON object. No other text.`
+      });
+      
       return true;
     }
 
@@ -298,13 +338,36 @@ async function autoProcessTranscript(transcript, title) {
       // Add the transcript as a message to the thread
       await openai.beta.threads.messages.create(thread.id, {
         role: "user",
-        content: `Extract development stories from this meeting transcript.
+        content: `CRITICAL: You MUST respond with ONLY valid JSON. No other text, no markdown, no explanations.
+
+Extract development stories from this meeting transcript and return them in this EXACT JSON format:
+
+{
+  "stories": [
+    {
+      "title": "story title",
+      "userStory": "As a [user], I want [goal] so that [benefit]",
+      "problemStatement": "problem description",
+      "type": "Feature",
+      "priority": "High",
+      "effort": "3 story points",
+      "epic": "epic name",
+      "description": "description",
+      "acceptanceCriteria": ["criteria1", "criteria2"],
+      "technicalRequirements": ["req1", "req2"],
+      "businessValue": "value description",
+      "risks": ["risk1", "risk2"],
+      "confidence": 0.85,
+      "discussionContext": "context from meeting"
+    }
+  ]
+}
 
 Meeting: ${title}
 
 Transcript: ${transcript}
 
-Remember to return ONLY valid JSON with the stories array structure, no markdown or extra text.`
+RESPOND WITH ONLY JSON - NO OTHER TEXT WHATSOEVER.`
       });
       
       // Run the assistant
@@ -356,13 +419,30 @@ Remember to return ONLY valid JSON with the stories array structure, no markdown
       
       let result;
       try {
-        // Clean the response - remove markdown code blocks
+        // Clean the response - remove markdown code blocks and extra text
         let cleanResponse = rawResponse.trim();
         
+        // Remove markdown code blocks
         if (cleanResponse.startsWith('```json')) {
           cleanResponse = cleanResponse.replace(/^```json\s*/, '').replace(/\s*```$/, '');
         } else if (cleanResponse.startsWith('```')) {
           cleanResponse = cleanResponse.replace(/^```\s*/, '').replace(/\s*```$/, '');
+        }
+        
+        // Find JSON object boundaries
+        const jsonStart = cleanResponse.indexOf('{');
+        const jsonEnd = cleanResponse.lastIndexOf('}');
+        
+        if (jsonStart !== -1 && jsonEnd !== -1 && jsonEnd > jsonStart) {
+          cleanResponse = cleanResponse.substring(jsonStart, jsonEnd + 1);
+        }
+        
+        // Remove any text before the JSON starts
+        if (!cleanResponse.startsWith('{')) {
+          const braceIndex = cleanResponse.indexOf('{');
+          if (braceIndex !== -1) {
+            cleanResponse = cleanResponse.substring(braceIndex);
+          }
         }
         
         result = JSON.parse(cleanResponse);
