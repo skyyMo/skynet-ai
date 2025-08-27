@@ -173,13 +173,40 @@ async function sendSlackNotification(story, webhookUrl) {
   }
 }
 
-// Initialize OpenAI and Assistant
+// Initialize OpenAI for direct completions
 const OpenAI = require('openai');
+const fs = require('fs');
+const path = require('path');
 let openai = null;
-let assistantId = null;
+let productContext = '';
 
-// Initialize OpenAI and create/retrieve assistant
-async function initializeAssistant() {
+// Load product context from file
+function loadProductContext() {
+  try {
+    const contextPath = path.join(__dirname, '..', 'context', 'PRODUCT_CONTEXT.md');
+    if (fs.existsSync(contextPath)) {
+      productContext = fs.readFileSync(contextPath, 'utf8');
+      console.log('✅ Product context loaded from PRODUCT_CONTEXT.md');
+      return true;
+    } else {
+      console.log('⚠️ No PRODUCT_CONTEXT.md found - using generic context');
+      productContext = `Generic product context. For better stories, create context/PRODUCT_CONTEXT.md with your specific:
+- Products and features
+- User personas  
+- Technical architecture
+- Business priorities
+- Domain knowledge`;
+      return false;
+    }
+  } catch (error) {
+    console.error('❌ Error loading product context:', error.message);
+    productContext = 'No product context available';
+    return false;
+  }
+}
+
+// Initialize OpenAI
+function initializeOpenAI() {
   if (!process.env.OPENAI_API_KEY) {
     console.error('❌ OpenAI API key not configured');
     return false;
@@ -189,21 +216,35 @@ async function initializeAssistant() {
     apiKey: process.env.OPENAI_API_KEY 
   });
 
-  try {
-    // If assistant ID is provided in env, use it
-    if (process.env.OPENAI_ASSISTANT_ID) {
-      assistantId = process.env.OPENAI_ASSISTANT_ID;
-      console.log(`✅ Using existing assistant: ${assistantId}`);
-      
-      // Verify assistant exists and update instructions to ensure JSON format
-      const assistant = await openai.beta.assistants.retrieve(assistantId);
-      console.log(`📋 Assistant name: ${assistant.name}`);
-      
-      // Update assistant with stricter JSON instructions
-      await openai.beta.assistants.update(assistantId, {
-        instructions: `You are SkyNet AI, an autonomous system for extracting clear, actionable development stories from meeting transcripts.
+  console.log('✅ OpenAI initialized for direct completions');
+  return true;
+}
 
-CRITICAL INSTRUCTION: You MUST respond with ONLY valid JSON. No other text, no markdown, no code blocks, no explanations before or after the JSON. Start your response with { and end with }.
+// Helper function to automatically process a transcript
+async function autoProcessTranscript(transcript, title) {
+  try {
+    console.log(`🤖 SkyNet auto-processing transcript: ${title}`);
+
+    if (!openai) {
+      const initialized = initializeOpenAI();
+      if (!initialized) {
+        console.error('❌ Failed to initialize OpenAI');
+        return null;
+      }
+    }
+
+    if (!transcript || transcript.length < 100) {
+      console.log(`⚠️ Skipping auto-processing: transcript too short (${transcript.length} chars)`);
+      return null;
+    }
+
+    // Build system prompt with product context
+    const systemPrompt = `You are SkyNet AI, an autonomous system for extracting clear, actionable development stories from meeting transcripts.
+
+PRODUCT CONTEXT:
+${productContext}
+
+CRITICAL INSTRUCTION: You MUST respond with ONLY valid JSON. No other text, no markdown, no code blocks, no explanations. Start your response with { and end with }.
 
 Required JSON structure:
 {
@@ -230,192 +271,45 @@ Required JSON structure:
 Extraction Rules:
 - Extract EVERY distinct development item discussed
 - Create separate stories for each deliverable
-- Use realistic user personas based on your product knowledge
+- Use realistic user personas from the product context above
 - Make titles action-oriented (Add, Fix, Implement, Create, Update)
 - Use Fibonacci sequence for effort (1, 2, 3, 5, 8)
 - Base priority on business impact discussed in meeting
-
-REMEMBER: Respond with ONLY the JSON object. No other text.`
-      });
-      
-      return true;
-    }
-
-    // Otherwise, create a new assistant
-    console.log('🔧 Creating new SkyNet Story Assistant...');
-    
-    const assistant = await openai.beta.assistants.create({
-      name: "SkyNet Story Extractor",
-      instructions: process.env.ASSISTANT_INSTRUCTIONS || `You are SkyNet AI, an autonomous system for extracting clear, actionable development stories from meeting transcripts.
-
-Output Rules (must follow exactly):
-- Return ONLY valid JSON
-- No markdown, no code blocks, no extra text
-- Use this exact schema:
-
-{
-  "stories": [
-    {
-      "title": "Clear, actionable story title",
-      "userStory": "As a [user type], I want [goal/desire] so that [benefit/value]",
-      "problemStatement": "What problem or opportunity this story addresses, written in plain language so the team understands why this matters",
-      "type": "Feature | Bug | Technical Debt | UX | Infrastructure | Performance | API | Database",
-      "priority": "High | Medium | Low",
-      "effort": "1-8 story points",
-      "epic": "Epic category this belongs to",
-      "description": "Detailed description of what needs to be built or changed",
-      "acceptanceCriteria": ["criterion 1", "criterion 2", "criterion 3"],
-      "technicalRequirements": ["requirement 1", "requirement 2"],
-      "businessValue": "Why this matters to the business",
-      "risks": ["risk 1", "risk 2"],
-      "confidence": 0.85,
-      "discussionContext": "Brief excerpt or summary of where this was discussed in the meeting"
-    }
-  ]
-}
-
-Extraction Rules:
-- Identify EVERY distinct development item discussed
-- Create one story per deliverable, even if items are related
-- Include: New features/enhancements, Bug fixes, Technical debt, UI/UX improvements, Infrastructure/scaling work, Performance optimizations, API/database changes
-
-User Story Rules (CRITICAL):
-- Always use format: "As a [specific user role/persona], I want [capability/goal] so that [benefit/value]"
-- Choose realistic user role from context (customer, admin, developer, manager, etc.)
-- Be specific and concrete about the benefit
-
-Problem/Opportunity Rules (IMPORTANT):
-The problemStatement must clearly explain:
-- What challenge the user/business is facing
-- Why solving it creates value (opportunity)
-- Any relevant context from the discussion
-- Keep it short but precise — 1-3 sentences
+- Reference the product context to understand user types, technical architecture, and business priorities
 
 Quality Guidelines:
-- Title: Action-oriented, starts with verb (Add, Fix, Implement, Create, Update, Refactor)
-- Effort: Use Fibonacci sequence (1, 2, 3, 5, 8) for story points
-- Priority: Based on business impact and urgency discussed in meeting
-- Acceptance Criteria: Specific, testable conditions for story completion
-- Technical Requirements: Implementation details, dependencies, constraints
-- Risks: Technical, business, or timeline risks mentioned or implied`,
-      model: "gpt-4o-mini",
-      tools: []
-    });
+- Title: Action-oriented, starts with verb
+- User Story: Use specific personas from product context
+- Problem Statement: Clear explanation of why this matters
+- Technical Requirements: Consider the tech stack from product context
+- Business Value: Connect to business priorities from product context
 
-    assistantId = assistant.id;
-    console.log(`✅ Created new assistant: ${assistantId}`);
-    console.log(`💡 Add OPENAI_ASSISTANT_ID=${assistantId} to your .env file to reuse this assistant`);
-    
-    return true;
-  } catch (error) {
-    console.error('❌ Failed to initialize assistant:', error.message);
-    return false;
-  }
-}
-
-// Helper function to automatically process a transcript
-async function autoProcessTranscript(transcript, title) {
-  try {
-    console.log(`🤖 SkyNet auto-processing transcript: ${title}`);
-
-    if (!openai || !assistantId) {
-      const initialized = await initializeAssistant();
-      if (!initialized) {
-        console.error('❌ Failed to initialize OpenAI Assistant');
-        return null;
-      }
-    }
-
-    if (!transcript || transcript.length < 100) {
-      console.log(`⚠️ Skipping auto-processing: transcript too short (${transcript.length} chars)`);
-      return null;
-    }
+REMEMBER: Respond with ONLY the JSON object. No other text.`;
 
     try {
-      // Create a new thread for this conversation
-      const thread = await openai.beta.threads.create();
-      
-      // Add the transcript as a message to the thread
-      await openai.beta.threads.messages.create(thread.id, {
-        role: "user",
-        content: `CRITICAL: You MUST respond with ONLY valid JSON. No other text, no markdown, no explanations.
-
-Extract development stories from this meeting transcript and return them in this EXACT JSON format:
-
-{
-  "stories": [
-    {
-      "title": "story title",
-      "userStory": "As a [user], I want [goal] so that [benefit]",
-      "problemStatement": "problem description",
-      "type": "Feature",
-      "priority": "High",
-      "effort": "3 story points",
-      "epic": "epic name",
-      "description": "description",
-      "acceptanceCriteria": ["criteria1", "criteria2"],
-      "technicalRequirements": ["req1", "req2"],
-      "businessValue": "value description",
-      "risks": ["risk1", "risk2"],
-      "confidence": 0.85,
-      "discussionContext": "context from meeting"
-    }
-  ]
-}
+      const completion = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [
+          {
+            role: "system",
+            content: systemPrompt
+          },
+          {
+            role: "user",
+            content: `Extract development stories from this meeting transcript:
 
 Meeting: ${title}
 
 Transcript: ${transcript}
 
-RESPOND WITH ONLY JSON - NO OTHER TEXT WHATSOEVER.`
+Return ONLY the JSON object with the stories array.`
+          }
+        ],
+        temperature: 0.2,
+        max_tokens: 4000
       });
       
-      // Run the assistant
-      const run = await openai.beta.threads.runs.create(thread.id, {
-        assistant_id: assistantId
-      });
-      
-      // Wait for the run to complete
-      let runStatus = await openai.beta.threads.runs.retrieve(thread.id, run.id);
-      let attempts = 0;
-      const maxAttempts = 30; // 30 seconds timeout
-      
-      while (runStatus.status !== 'completed' && attempts < maxAttempts) {
-        if (runStatus.status === 'failed' || runStatus.status === 'cancelled' || runStatus.status === 'expired') {
-          console.error(`❌ Assistant run failed with status: ${runStatus.status}`);
-          return null;
-        }
-        
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        runStatus = await openai.beta.threads.runs.retrieve(thread.id, run.id);
-        attempts++;
-      }
-      
-      if (runStatus.status !== 'completed') {
-        console.error(`❌ Assistant run timed out with status: ${runStatus.status}`);
-        return null;
-      }
-      
-      // Get the messages
-      const messages = await openai.beta.threads.messages.list(thread.id);
-      
-      // Get the assistant's response (first message since we list in reverse chronological order)
-      const assistantMessage = messages.data[0];
-      
-      if (!assistantMessage || assistantMessage.role !== 'assistant') {
-        console.error('❌ No assistant response found');
-        return null;
-      }
-      
-      // Extract the text content
-      const rawResponse = assistantMessage.content[0].text.value;
-      
-      // Clean up the thread
-      try {
-        await openai.beta.threads.del(thread.id);
-      } catch (e) {
-        // Thread deletion might not be supported yet, ignore error
-      }
+      const rawResponse = completion.choices[0].message.content;
       
       let result;
       try {
@@ -466,12 +360,12 @@ RESPOND WITH ONLY JSON - NO OTHER TEXT WHATSOEVER.`
         
       } catch (parseError) {
         console.error('❌ Auto-processing failed - invalid AI response:', parseError.message);
-        console.error('Raw response:', rawResponse);
+        console.error('Raw response (first 500 chars):', rawResponse.substring(0, 500));
         return null;
       }
       
     } catch (error) {
-      console.error('❌ Assistant API error:', error.message);
+      console.error('❌ OpenAI completion error:', error.message);
       return null;
     }
     
@@ -1390,14 +1284,22 @@ app.listen(port, async () => {
     autoProcessing: process.env.ENABLE_AUTO_PROCESSING === 'true'
   });
   
-  // Initialize OpenAI Assistant on startup
+  // Initialize OpenAI and load context on startup
   if (process.env.OPENAI_API_KEY) {
-    console.log('🧠 Initializing OpenAI Assistant...');
-    const assistantReady = await initializeAssistant();
-    if (assistantReady) {
-      console.log('✅ OpenAI Assistant ready for story extraction');
+    console.log('🧠 Initializing OpenAI for direct completions...');
+    const openaiReady = initializeOpenAI();
+    const contextLoaded = loadProductContext();
+    
+    if (openaiReady) {
+      console.log('✅ OpenAI ready for story extraction');
     } else {
-      console.log('⚠️ OpenAI Assistant initialization failed - will retry on first use');
+      console.log('⚠️ OpenAI initialization failed - will retry on first use');
+    }
+    
+    if (contextLoaded) {
+      console.log('✅ Product context loaded - stories will be tailored to your business');
+    } else {
+      console.log('💡 Tip: Create context/PRODUCT_CONTEXT.md with your product info for better stories');
     }
   }
   
