@@ -1164,311 +1164,6 @@ function App() {
                 </div>
               </div>
 
-              {/* Configuration Modals */}
-              {showSlackConfig && (
-                <div style={{
-                  position: 'fixed',
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  backgroundColor: 'rgba(0, 0, 0, 0.5)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  zIndex: 1000
-                }}>
-                  <div style={{
-                    backgroundColor: '#1f2937',
-                    borderRadius: '8px',
-                    padding: '24px',
-                    width: '90%',
-                    maxWidth: '400px',
-                    border: '1px solid #374151'
-                  }}>
-                    <h3 style={{ fontSize: '18px', fontWeight: 'bold', color: 'white', marginBottom: '16px' }}>
-                      📱 Slack Configuration
-                    </h3>
-                    
-                    <div style={{ marginBottom: '16px', padding: '12px', backgroundColor: '#374151', borderRadius: '6px', fontSize: '14px', color: '#d1d5db' }}>
-                      🔗 Get your webhook URL from:<br/>
-                      <a href="https://api.slack.com/messaging/webhooks" target="_blank" rel="noopener noreferrer" style={{ color: '#60a5fa' }}>
-                        https://api.slack.com/messaging/webhooks
-                      </a>
-                    </div>
-                    
-                    {slackConfig.webhookUrl && (
-                      <div style={{ marginBottom: '16px' }}>
-                        <button
-                          onClick={async () => {
-                            try {
-                              const response = await fetch('/api/test-slack', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ webhookUrl: slackConfig.webhookUrl })
-                              });
-                              const result = await response.json();
-                              
-                              if (result.success) {
-                                alert('✅ Webhook test successful! Check your Slack channel.');
-                              } else {
-                                alert(`❌ Webhook test failed: ${result.error}`);
-                                console.error('Webhook test details:', result);
-                              }
-                            } catch (error) {
-                              alert(`❌ Test error: ${error.message}`);
-                            }
-                          }}
-                          style={{
-                            width: '100%',
-                            padding: '8px 12px',
-                            background: 'linear-gradient(135deg, #22c55e, #16a34a)',
-                            color: 'white',
-                            border: 'none',
-                            borderRadius: '6px',
-                            cursor: 'pointer',
-                            fontSize: '14px',
-                            fontWeight: '500'
-                          }}
-                        >
-                          🧪 Test Webhook Connection
-                        </button>
-                      </div>
-                    )}
-                    
-                    <div>
-                      <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', color: '#d1d5db', marginBottom: '4px' }}>
-                        Slack Webhook URL
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="https://hooks.slack.com/services/..."
-                        value={slackConfig.webhookUrl}
-                        onChange={(e) => setSlackConfig(prev => ({...prev, webhookUrl: e.target.value}))}
-                        style={{
-                          width: '100%',
-                          padding: '8px 12px',
-                          backgroundColor: '#374151',
-                          border: '1px solid #4b5563',
-                          borderRadius: '6px',
-                          color: 'white'
-                        }}
-                      />
-                    </div>
-                    
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', marginTop: '24px' }}>
-                      <button
-                        onClick={() => setShowSlackConfig(false)}
-                        style={{
-                          padding: '8px 16px',
-                          backgroundColor: '#4b5563',
-                          color: 'white',
-                          border: 'none',
-                          borderRadius: '6px',
-                          cursor: 'pointer'
-                        }}
-                      >
-                        Cancel
-                      </button>
-                      
-                      <button
-                        onClick={clearSlackConfig}
-                        style={{
-                          padding: '8px 16px',
-                          backgroundColor: '#ef4444',
-                          color: 'white',
-                          border: 'none',
-                          borderRadius: '6px',
-                          cursor: 'pointer'
-                        }}
-                      >
-                        🗑️ Clear
-                      </button>
-                      
-                      <button
-                        onClick={() => {
-                          saveSlackConfig(slackConfig);
-                          setShowSlackConfig(false);
-                          alert('🤖 Slack configuration saved! SkyNet ready for notifications.');
-                        }}
-                        disabled={!slackConfig.webhookUrl}
-                        style={{
-                          padding: '8px 16px',
-                          background: 'linear-gradient(135deg, #a855f7, #7c3aed)',
-                          color: 'white',
-                          border: 'none',
-                          borderRadius: '6px',
-                          cursor: 'pointer',
-                          opacity: !slackConfig.webhookUrl ? 0.5 : 1
-                        }}
-                      >
-                        💾 Save Config
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {showJiraConfig && (
-                <div style={{
-                  position: 'fixed',
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  backgroundColor: 'rgba(0, 0, 0, 0.5)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  zIndex: 1000
-                }}>
-                  <div style={{
-                    backgroundColor: '#1f2937',
-                    borderRadius: '8px',
-                    padding: '24px',
-                    width: '90%',
-                    maxWidth: '400px',
-                    border: '1px solid #374151'
-                  }}>
-                    <h3 style={{ fontSize: '18px', fontWeight: 'bold', color: 'white', marginBottom: '16px' }}>
-                      🔧 JIRA Configuration
-                    </h3>
-                    
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                      <div>
-                        <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', color: '#d1d5db', marginBottom: '4px' }}>
-                          JIRA URL
-                        </label>
-                        <input
-                          type="text"
-                          placeholder="https://yourcompany.atlassian.net"
-                          value={jiraConfig.url}
-                          onChange={(e) => setJiraConfig(prev => ({...prev, url: e.target.value}))}
-                          style={{
-                            width: '100%',
-                            padding: '8px 12px',
-                            backgroundColor: '#374151',
-                            border: '1px solid #4b5563',
-                            borderRadius: '6px',
-                            color: 'white'
-                          }}
-                        />
-                      </div>
-                      
-                      <div>
-                        <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', color: '#d1d5db', marginBottom: '4px' }}>
-                          Email
-                        </label>
-                        <input
-                          type="email"
-                          placeholder="your-email@company.com"
-                          value={jiraConfig.email}
-                          onChange={(e) => setJiraConfig(prev => ({...prev, email: e.target.value}))}
-                          style={{
-                            width: '100%',
-                            padding: '8px 12px',
-                            backgroundColor: '#374151',
-                            border: '1px solid #4b5563',
-                            borderRadius: '6px',
-                            color: 'white'
-                          }}
-                        />
-                      </div>
-                      
-                      <div>
-                        <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', color: '#d1d5db', marginBottom: '4px' }}>
-                          API Token
-                        </label>
-                        <input
-                          type="password"
-                          placeholder="Your JIRA API token"
-                          value={jiraConfig.token}
-                          onChange={(e) => setJiraConfig(prev => ({...prev, token: e.target.value}))}
-                          style={{
-                            width: '100%',
-                            padding: '8px 12px',
-                            backgroundColor: '#374151',
-                            border: '1px solid #4b5563',
-                            borderRadius: '6px',
-                            color: 'white'
-                          }}
-                        />
-                      </div>
-                      
-                      <div>
-                        <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', color: '#d1d5db', marginBottom: '4px' }}>
-                          Project Key
-                        </label>
-                        <input
-                          type="text"
-                          placeholder="PROJ"
-                          value={jiraConfig.projectKey}
-                          onChange={(e) => setJiraConfig(prev => ({...prev, projectKey: e.target.value}))}
-                          style={{
-                            width: '100%',
-                            padding: '8px 12px',
-                            backgroundColor: '#374151',
-                            border: '1px solid #4b5563',
-                            borderRadius: '6px',
-                            color: 'white'
-                          }}
-                        />
-                      </div>
-                    </div>
-                    
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', marginTop: '24px' }}>
-                      <button
-                        onClick={() => setShowJiraConfig(false)}
-                        style={{
-                          padding: '8px 16px',
-                          backgroundColor: '#4b5563',
-                          color: 'white',
-                          border: 'none',
-                          borderRadius: '6px',
-                          cursor: 'pointer'
-                        }}
-                      >
-                        Cancel
-                      </button>
-                      
-                      <button
-                        onClick={clearJiraConfig}
-                        style={{
-                          padding: '8px 16px',
-                          backgroundColor: '#ef4444',
-                          color: 'white',
-                          border: 'none',
-                          borderRadius: '6px',
-                          cursor: 'pointer'
-                        }}
-                      >
-                        🗑️ Clear All
-                      </button>
-                      
-                      <button
-                        onClick={() => {
-                          saveJiraConfig(jiraConfig);
-                          setShowJiraConfig(false);
-                          alert('🤖 JIRA configuration saved! SkyNet ready for deployment.');
-                        }}
-                        disabled={!jiraConfig.url || !jiraConfig.email || !jiraConfig.token || !jiraConfig.projectKey}
-                        style={{
-                          padding: '8px 16px',
-                          background: 'linear-gradient(135deg, #3b82f6, #1d4ed8)',
-                          color: 'white',
-                          border: 'none',
-                          borderRadius: '6px',
-                          cursor: 'pointer',
-                          opacity: (!jiraConfig.url || !jiraConfig.email || !jiraConfig.token || !jiraConfig.projectKey) ? 0.5 : 1
-                        }}
-                      >
-                        💾 Save Config
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-
               {/* Stories List */}
               {filteredAndSortedStories.map(story => (
                 <div key={story.id} style={styles.card}>
@@ -1708,6 +1403,311 @@ function App() {
           )}
         </div>
       </div>
+      
+      {/* Configuration Modals - Moved outside tab content to always be accessible */}
+      {showSlackConfig && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000
+        }}>
+          <div style={{
+            backgroundColor: '#1f2937',
+            borderRadius: '8px',
+            padding: '24px',
+            width: '90%',
+            maxWidth: '400px',
+            border: '1px solid #374151'
+          }}>
+            <h3 style={{ fontSize: '18px', fontWeight: 'bold', color: 'white', marginBottom: '16px' }}>
+              📱 Slack Configuration
+            </h3>
+            
+            <div style={{ marginBottom: '16px', padding: '12px', backgroundColor: '#374151', borderRadius: '6px', fontSize: '14px', color: '#d1d5db' }}>
+              🔗 Get your webhook URL from:<br/>
+              <a href="https://api.slack.com/messaging/webhooks" target="_blank" rel="noopener noreferrer" style={{ color: '#60a5fa' }}>
+                https://api.slack.com/messaging/webhooks
+              </a>
+            </div>
+            
+            {slackConfig.webhookUrl && (
+              <div style={{ marginBottom: '16px' }}>
+                <button
+                  onClick={async () => {
+                    try {
+                      const response = await fetch('/api/test-slack', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ webhookUrl: slackConfig.webhookUrl })
+                      });
+                      const result = await response.json();
+                      
+                      if (result.success) {
+                        alert('✅ Webhook test successful! Check your Slack channel.');
+                      } else {
+                        alert(`❌ Webhook test failed: ${result.error}`);
+                        console.error('Webhook test details:', result);
+                      }
+                    } catch (error) {
+                      alert(`❌ Test error: ${error.message}`);
+                    }
+                  }}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    background: 'linear-gradient(135deg, #22c55e, #16a34a)',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    fontSize: '14px',
+                    fontWeight: '500'
+                  }}
+                >
+                  🧪 Test Webhook Connection
+                </button>
+              </div>
+            )}
+            
+            <div>
+              <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', color: '#d1d5db', marginBottom: '4px' }}>
+                Slack Webhook URL
+              </label>
+              <input
+                type="text"
+                placeholder="https://hooks.slack.com/services/..."
+                value={slackConfig.webhookUrl}
+                onChange={(e) => setSlackConfig(prev => ({...prev, webhookUrl: e.target.value}))}
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  backgroundColor: '#374151',
+                  border: '1px solid #4b5563',
+                  borderRadius: '6px',
+                  color: 'white'
+                }}
+              />
+            </div>
+            
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', marginTop: '24px' }}>
+              <button
+                onClick={() => setShowSlackConfig(false)}
+                style={{
+                  padding: '8px 16px',
+                  backgroundColor: '#4b5563',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  cursor: 'pointer'
+                }}
+              >
+                Cancel
+              </button>
+              
+              <button
+                onClick={clearSlackConfig}
+                style={{
+                  padding: '8px 16px',
+                  backgroundColor: '#ef4444',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  cursor: 'pointer'
+                }}
+              >
+                🗑️ Clear
+              </button>
+              
+              <button
+                onClick={() => {
+                  saveSlackConfig(slackConfig);
+                  setShowSlackConfig(false);
+                  alert('🤖 Slack configuration saved! SkyNet ready for notifications.');
+                }}
+                disabled={!slackConfig.webhookUrl}
+                style={{
+                  padding: '8px 16px',
+                  background: 'linear-gradient(135deg, #a855f7, #7c3aed)',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  opacity: !slackConfig.webhookUrl ? 0.5 : 1
+                }}
+              >
+                💾 Save Config
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showJiraConfig && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000
+        }}>
+          <div style={{
+            backgroundColor: '#1f2937',
+            borderRadius: '8px',
+            padding: '24px',
+            width: '90%',
+            maxWidth: '400px',
+            border: '1px solid #374151'
+          }}>
+            <h3 style={{ fontSize: '18px', fontWeight: 'bold', color: 'white', marginBottom: '16px' }}>
+              🔧 JIRA Configuration
+            </h3>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', color: '#d1d5db', marginBottom: '4px' }}>
+                  JIRA URL
+                </label>
+                <input
+                  type="text"
+                  placeholder="https://yourcompany.atlassian.net"
+                  value={jiraConfig.url}
+                  onChange={(e) => setJiraConfig(prev => ({...prev, url: e.target.value}))}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    backgroundColor: '#374151',
+                    border: '1px solid #4b5563',
+                    borderRadius: '6px',
+                    color: 'white'
+                  }}
+                />
+              </div>
+              
+              <div>
+                <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', color: '#d1d5db', marginBottom: '4px' }}>
+                  Email
+                </label>
+                <input
+                  type="email"
+                  placeholder="your-email@company.com"
+                  value={jiraConfig.email}
+                  onChange={(e) => setJiraConfig(prev => ({...prev, email: e.target.value}))}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    backgroundColor: '#374151',
+                    border: '1px solid #4b5563',
+                    borderRadius: '6px',
+                    color: 'white'
+                  }}
+                />
+              </div>
+              
+              <div>
+                <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', color: '#d1d5db', marginBottom: '4px' }}>
+                  API Token
+                </label>
+                <input
+                  type="password"
+                  placeholder="Your JIRA API token"
+                  value={jiraConfig.token}
+                  onChange={(e) => setJiraConfig(prev => ({...prev, token: e.target.value}))}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    backgroundColor: '#374151',
+                    border: '1px solid #4b5563',
+                    borderRadius: '6px',
+                    color: 'white'
+                  }}
+                />
+              </div>
+              
+              <div>
+                <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', color: '#d1d5db', marginBottom: '4px' }}>
+                  Project Key
+                </label>
+                <input
+                  type="text"
+                  placeholder="PROJ"
+                  value={jiraConfig.projectKey}
+                  onChange={(e) => setJiraConfig(prev => ({...prev, projectKey: e.target.value}))}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    backgroundColor: '#374151',
+                    border: '1px solid #4b5563',
+                    borderRadius: '6px',
+                    color: 'white'
+                  }}
+                />
+              </div>
+            </div>
+            
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', marginTop: '24px' }}>
+              <button
+                onClick={() => setShowJiraConfig(false)}
+                style={{
+                  padding: '8px 16px',
+                  backgroundColor: '#4b5563',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  cursor: 'pointer'
+                }}
+              >
+                Cancel
+              </button>
+              
+              <button
+                onClick={clearJiraConfig}
+                style={{
+                  padding: '8px 16px',
+                  backgroundColor: '#ef4444',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  cursor: 'pointer'
+                }}
+              >
+                🗑️ Clear All
+              </button>
+              
+              <button
+                onClick={() => {
+                  saveJiraConfig(jiraConfig);
+                  setShowJiraConfig(false);
+                  alert('🤖 JIRA configuration saved! SkyNet ready for deployment.');
+                }}
+                disabled={!jiraConfig.url || !jiraConfig.email || !jiraConfig.token || !jiraConfig.projectKey}
+                style={{
+                  padding: '8px 16px',
+                  background: 'linear-gradient(135deg, #3b82f6, #1d4ed8)',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  opacity: (!jiraConfig.url || !jiraConfig.email || !jiraConfig.token || !jiraConfig.projectKey) ? 0.5 : 1
+                }}
+              >
+                💾 Save Config
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
