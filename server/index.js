@@ -176,7 +176,6 @@ async function sendSlackNotification(story, webhookUrl) {
 // Initialize OpenAI for direct completions
 const OpenAI = require('openai');
 const fs = require('fs');
-const path = require('path');
 let openai = null;
 let productContext = '';
 
