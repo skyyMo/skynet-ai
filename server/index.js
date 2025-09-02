@@ -431,7 +431,7 @@ Return ONLY the JSON object with the stories array.`
             id: `story-${Date.now()}-${index}`,
             sourceTranscript: title,
             sourceTimestamp: new Date().toISOString().split('T')[0],
-            fathomShareUrl: fathomShareUrl || '',
+            fathomShareUrl: fathomShareUrl,
             autoProcessed: true
           }));
           
