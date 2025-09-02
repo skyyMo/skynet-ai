@@ -1324,25 +1324,8 @@ if (process.env.ENABLE_AUTO_PROCESSING === 'true') {
   
   console.log('🕒 SkyNet auto-processing enabled: scanning every 2 minutes');
   
-  // Initial check on startup for any unprocessed transcripts
-  setTimeout(async () => {
-    console.log('🚀 Running initial scan for unprocessed transcripts...');
-    try {
-      const response = await fetch(`http://localhost:${port}/api/webhook/notion-transcript`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({})
-      });
-      const result = await response.json();
-      if (result.transcriptsProcessed > 0) {
-        console.log(`✅ Initial scan complete: ${result.transcriptsProcessed} transcripts processed, ${result.storiesGenerated} stories generated`);
-      } else {
-        console.log('✅ Initial scan complete: All transcripts already processed');
-      }
-    } catch (error) {
-      console.error('❌ Initial scan error:', error.message);
-    }
-  }, 5000); // Wait 5 seconds after startup
+  // Skip initial scan on startup to avoid any cached code issues
+  console.log('✅ Auto-processing initialized - will scan every 2 minutes for new transcripts');
 } else {
   console.log('⏸️ Auto-processing disabled. Set ENABLE_AUTO_PROCESSING=true to enable.');
 }
