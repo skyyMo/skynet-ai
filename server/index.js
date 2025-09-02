@@ -296,7 +296,15 @@ function initializeOpenAI() {
 }
 
 // Helper function to automatically process a transcript
-async function autoProcessTranscript(transcript, title) {
+async function autoProcessTranscript(transcript, title, fathomShareUrl = '') {
+  // If no fathomShareUrl provided, try to extract it from transcript content
+  if (!fathomShareUrl && transcript) {
+    const fathomUrlMatch = transcript.match(/https:\/\/fathom\.video\/share\/[A-Za-z0-9]+/);
+    if (fathomUrlMatch) {
+      fathomShareUrl = fathomUrlMatch[0];
+      console.log(`🎥 Extracted Fathom URL from transcript: ${fathomShareUrl}`);
+    }
+  }
   try {
     console.log(`🤖 SkyNet auto-processing transcript: ${title}`);
 
@@ -670,6 +678,10 @@ app.get('/api/transcripts', async (req, res) => {
               .join('') + '\n';
           }
         });
+
+        // Extract Fathom share URL from content
+        const fathomUrlMatch = content.match(/https:\/\/fathom\.video\/share\/[A-Za-z0-9]+/);
+        const extractedFathomUrl = fathomUrlMatch ? fathomUrlMatch[0] : '';
         
         return {
           id: page.id,
@@ -677,7 +689,7 @@ app.get('/api/transcripts', async (req, res) => {
           content: content.trim(),
           date: properties['Created time']?.created_time?.split('T')[0] || '',
           createdTime: properties['Created time']?.created_time || '',
-          fathomShareUrl: properties['Fathom Share URL']?.url || properties['Share URL']?.url || properties['Meeting URL']?.url || '',
+          fathomShareUrl: extractedFathomUrl,
           wordCount: content.trim().split(' ').length,
           processed: processedTranscriptIds.has(page.id),
           autoProcessed: processedTranscriptIds.has(page.id)
@@ -690,7 +702,7 @@ app.get('/api/transcripts', async (req, res) => {
           content: '',
           date: properties['Created time']?.created_time?.split('T')[0] || '',
           createdTime: properties['Created time']?.created_time || '',
-          fathomShareUrl: properties['Fathom Share URL']?.url || properties['Share URL']?.url || properties['Meeting URL']?.url || '',
+          fathomShareUrl: '',
           wordCount: 0,
           processed: false,
           autoProcessed: false,
@@ -941,12 +953,8 @@ app.post('/api/webhook/notion-transcript', async (req, res) => {
 
         const properties = page.properties;
         const title = properties.Name?.title?.[0]?.plain_text || 'Untitled Meeting';
-        const fathomShareUrl = properties['Fathom Share URL']?.url || properties['Share URL']?.url || properties['Meeting URL']?.url || '';
         
         console.log(`📄 Processing specific transcript: ${title}`);
-        if (fathomShareUrl) {
-          console.log(`🎥 Fathom share URL found: ${fathomShareUrl}`);
-        }
         
         // Get page content
         const pageContent = await notion.blocks.children.list({
@@ -985,11 +993,6 @@ app.post('/api/webhook/notion-transcript', async (req, res) => {
           
           if (processResult && processResult.stories && processResult.stories.length > 0) {
             processedCount++;
-            // Add Fathom share URL to each story
-            processResult.stories = processResult.stories.map(story => ({
-              ...story,
-              fathomShareUrl: fathomShareUrl || ''
-            }));
             storiesGenerated = processResult.stories;
             
             // Mark as processed
@@ -1039,7 +1042,6 @@ app.post('/api/webhook/notion-transcript', async (req, res) => {
         
         const properties = page.properties;
         const title = properties.Name?.title?.[0]?.plain_text || 'Untitled Meeting';
-        const fathomShareUrl = properties['Fathom Share URL']?.url || properties['Share URL']?.url || properties['Meeting URL']?.url || '';
         
         try {
           const pageContent = await notion.blocks.children.list({
@@ -1172,11 +1174,6 @@ app.post('/api/auto-process-all', async (req, res) => {
             processedCount++;
             totalStories += processResult.stories.length;
             
-            // Add Fathom share URL to each story
-            processResult.stories = processResult.stories.map(story => ({
-              ...story,
-              fathomShareUrl: fathomShareUrl || ''
-            }));
             
             // Mark transcript as processed
             markTranscriptProcessed(page.id);
@@ -1281,7 +1278,6 @@ if (process.env.ENABLE_AUTO_PROCESSING === 'true') {
         
         const properties = page.properties;
         const title = properties.Name?.title?.[0]?.plain_text || 'Untitled Meeting';
-        const fathomShareUrl = properties['Fathom Share URL']?.url || properties['Share URL']?.url || properties['Meeting URL']?.url || '';
         
         try {
           const pageContent = await notion.blocks.children.list({
