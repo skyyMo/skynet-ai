@@ -102,7 +102,7 @@ async function sendSlackNotification(story, webhookUrl) {
         "elements": [
           {
             "type": "mrkdwn",
-            "text": `📊 Confidence: ${Math.round(story.confidence * 100)}% | 📅 From: ${story.sourceTranscript} | ⏰ ${story.sourceTimestamp}`
+            "text": `📊 Confidence: ${Math.round(story.confidence * 100)}% | 📅 From: ${story.sourceTranscript} | ⏰ ${story.sourceTimestamp}${story.fathomShareUrl ? ` | 🎥 <${story.fathomShareUrl}|View Recording>` : ''}`
           }
         ]
       },
@@ -423,6 +423,7 @@ Return ONLY the JSON object with the stories array.`
             id: `story-${Date.now()}-${index}`,
             sourceTranscript: title,
             sourceTimestamp: new Date().toISOString().split('T')[0],
+            fathomShareUrl: fathomShareUrl || '',
             autoProcessed: true
           }));
           
@@ -676,6 +677,7 @@ app.get('/api/transcripts', async (req, res) => {
           content: content.trim(),
           date: properties['Created time']?.created_time?.split('T')[0] || '',
           createdTime: properties['Created time']?.created_time || '',
+          fathomShareUrl: properties['Fathom Share URL']?.url || properties['Share URL']?.url || properties['Meeting URL']?.url || '',
           wordCount: content.trim().split(' ').length,
           processed: processedTranscriptIds.has(page.id),
           autoProcessed: processedTranscriptIds.has(page.id)
@@ -688,6 +690,7 @@ app.get('/api/transcripts', async (req, res) => {
           content: '',
           date: properties['Created time']?.created_time?.split('T')[0] || '',
           createdTime: properties['Created time']?.created_time || '',
+          fathomShareUrl: properties['Fathom Share URL']?.url || properties['Share URL']?.url || properties['Meeting URL']?.url || '',
           wordCount: 0,
           processed: false,
           autoProcessed: false,
@@ -714,7 +717,7 @@ app.get('/api/transcripts', async (req, res) => {
 // Process transcript with AI - Updated with Slack status tracking
 app.post('/api/process-transcript', async (req, res) => {
   try {
-    const { transcript, title, slackWebhook } = req.body;
+    const { transcript, title, slackWebhook, fathomShareUrl } = req.body;
     const webhookUrl = slackWebhook || process.env.SLACK_WEBHOOK_URL;
     
     if (!process.env.OPENAI_API_KEY) {
@@ -938,8 +941,12 @@ app.post('/api/webhook/notion-transcript', async (req, res) => {
 
         const properties = page.properties;
         const title = properties.Name?.title?.[0]?.plain_text || 'Untitled Meeting';
+        const fathomShareUrl = properties['Fathom Share URL']?.url || properties['Share URL']?.url || properties['Meeting URL']?.url || '';
         
         console.log(`📄 Processing specific transcript: ${title}`);
+        if (fathomShareUrl) {
+          console.log(`🎥 Fathom share URL found: ${fathomShareUrl}`);
+        }
         
         // Get page content
         const pageContent = await notion.blocks.children.list({
@@ -978,6 +985,11 @@ app.post('/api/webhook/notion-transcript', async (req, res) => {
           
           if (processResult && processResult.stories && processResult.stories.length > 0) {
             processedCount++;
+            // Add Fathom share URL to each story
+            processResult.stories = processResult.stories.map(story => ({
+              ...story,
+              fathomShareUrl: fathomShareUrl || ''
+            }));
             storiesGenerated = processResult.stories;
             
             // Mark as processed
@@ -1027,6 +1039,7 @@ app.post('/api/webhook/notion-transcript', async (req, res) => {
         
         const properties = page.properties;
         const title = properties.Name?.title?.[0]?.plain_text || 'Untitled Meeting';
+        const fathomShareUrl = properties['Fathom Share URL']?.url || properties['Share URL']?.url || properties['Meeting URL']?.url || '';
         
         try {
           const pageContent = await notion.blocks.children.list({
@@ -1050,6 +1063,11 @@ app.post('/api/webhook/notion-transcript', async (req, res) => {
             
             if (processResult && processResult.stories && processResult.stories.length > 0) {
               processedCount++;
+              // Add Fathom share URL to each story
+              processResult.stories = processResult.stories.map(story => ({
+                ...story,
+                fathomShareUrl: fathomShareUrl || ''
+              }));
               storiesGenerated = [...storiesGenerated, ...processResult.stories];
               
               // Mark as processed
@@ -1123,6 +1141,7 @@ app.post('/api/auto-process-all', async (req, res) => {
     for (const page of response.results) {
       const properties = page.properties;
       const title = properties.Name?.title?.[0]?.plain_text || 'Untitled Meeting';
+      const fathomShareUrl = properties['Fathom Share URL']?.url || properties['Share URL']?.url || properties['Meeting URL']?.url || '';
       
       try {
         const pageContent = await notion.blocks.children.list({
@@ -1152,6 +1171,12 @@ app.post('/api/auto-process-all', async (req, res) => {
           if (processResult && processResult.stories && processResult.stories.length > 0) {
             processedCount++;
             totalStories += processResult.stories.length;
+            
+            // Add Fathom share URL to each story
+            processResult.stories = processResult.stories.map(story => ({
+              ...story,
+              fathomShareUrl: fathomShareUrl || ''
+            }));
             
             // Mark transcript as processed
             markTranscriptProcessed(page.id);
@@ -1256,6 +1281,7 @@ if (process.env.ENABLE_AUTO_PROCESSING === 'true') {
         
         const properties = page.properties;
         const title = properties.Name?.title?.[0]?.plain_text || 'Untitled Meeting';
+        const fathomShareUrl = properties['Fathom Share URL']?.url || properties['Share URL']?.url || properties['Meeting URL']?.url || '';
         
         try {
           const pageContent = await notion.blocks.children.list({
@@ -1279,6 +1305,12 @@ if (process.env.ENABLE_AUTO_PROCESSING === 'true') {
             
             if (processResult && processResult.stories && processResult.stories.length > 0) {
               newProcessedCount++;
+              
+              // Add Fathom share URL to each story
+              processResult.stories = processResult.stories.map(story => ({
+                ...story,
+                fathomShareUrl: fathomShareUrl || ''
+              }));
               
               // Mark transcript as processed
               markTranscriptProcessed(page.id);

@@ -113,7 +113,8 @@ function App() {
         body: JSON.stringify({ 
           transcript: transcript.content,
           title: transcript.title,
-          slackWebhook: slackConfig.webhookUrl || undefined
+          slackWebhook: slackConfig.webhookUrl || undefined,
+          fathomShareUrl: transcript.fathomShareUrl || undefined
         })
       });
       
@@ -936,6 +937,24 @@ function App() {
                           <span>👥</span>
                           {transcript.wordCount} words
                         </span>
+                        {transcript.fathomShareUrl && (
+                          <a 
+                            href={transcript.fathomShareUrl} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            style={{ 
+                              display: 'flex', 
+                              alignItems: 'center', 
+                              gap: '4px', 
+                              color: '#60a5fa', 
+                              textDecoration: 'none',
+                              fontSize: '14px'
+                            }}
+                          >
+                            <span>🎥</span>
+                            View Recording
+                          </a>
+                        )}
                         {transcript.processed && (
                           <span style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#34d399' }}>
                             <span>✅</span>
@@ -1207,6 +1226,24 @@ function App() {
                     
                     <div style={{ fontSize: '12px', color: '#6b7280', display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
                       <span>From: {story.sourceTranscript} • {story.sourceTimestamp}</span>
+                      {story.fathomShareUrl && (
+                        <a 
+                          href={story.fathomShareUrl} 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          style={{ 
+                            display: 'flex', 
+                            alignItems: 'center', 
+                            gap: '4px', 
+                            color: '#60a5fa', 
+                            textDecoration: 'none',
+                            fontSize: '12px'
+                          }}
+                        >
+                          <span>🎥</span>
+                          View Recording
+                        </a>
+                      )}
                       {getSlackStatusIndicator(story)}
                     </div>
                   </div>
